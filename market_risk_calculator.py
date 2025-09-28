@@ -54,14 +54,13 @@ def garch_vols(returns: pd.DataFrame) -> pd.Series:
     return pd.Series(vols)
 
 def garch_cov(returns: pd.DataFrame) -> pd.DataFrame:
-    """Build covariance matrix: vol from GARCH, correlation from sample."""
+    # Build covariance matrix: vol from GARCH, correlation from sample
     vols = garch_vols(returns)
     corr = returns.corr()
     cov = np.outer(vols, vols) * corr.to_numpy()
     return pd.DataFrame(cov, index=returns.columns, columns=returns.columns)
 
 def mv_t_draws(n: int, mu: np.ndarray, cov: np.ndarray, df: float, rng: np.random.Generator) -> np.ndarray:
-    """Multivariate Student-t draws via scale mixture of normals."""
     g = rng.chisquare(df, size=n) / df
     z = rng.multivariate_normal(np.zeros(cov.shape[0]), cov, size=n)
     return mu + z / np.sqrt(g)[:, None]
