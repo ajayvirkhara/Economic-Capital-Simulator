@@ -1,0 +1,25 @@
+# Market Risk Configuration
+market_risk:
+  tickers:
+    SPY: "Equities (US)"
+    EFA: "Equities (Developed ex-US)"
+    EEM: "Equities (EM)"
+    TLT: "US Treasuries (long duration)"
+    LQD: "IG Credit ETF"
+    HYG: "HY Credit ETF"
+    GLD: "Gold"
+    USO: "Oil"
+    EURUSD=X: "EURUSD"
+    GBPUSD=X: "GBPUSD"
+
+  simulation:
+    n_paths: 500000        # Monte Carlo simulations
+    horizon_days: 10       # base horizon (10D)
+    var_q: 0.999           # 99.9% confidence
+    scaling_days_year: 252 # trading days in a year
+    df_t: 7.0              # Student-t degrees of freedom
+    cov_method: "EWMA"     # EWMA | SAMPLE | GARCH
+    ewma_lambda: 0.97      # EWMA decay
+    fix_mean: true         # zero-mean shocks
+    seed: 42               # RNG seed
+    allocation_method: "Euler-ES"  # ES allocation
