@@ -15,7 +15,6 @@ ENV/
 
 # ---- Jupyter / IPython ----
 .ipynb_checkpoints/
-*.ipynb
 
 # ---- Test & Coverage ----
 .pytest_cache/
