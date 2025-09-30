@@ -6,9 +6,15 @@ This script can be executed directly with:
 """
 
 from __future__ import annotations
+import logging
 
 from .market_risk import MarketRiskEconomicCapital
 from .data_loaders import load_real_risk_factors, load_dummy_positions
+
+# Configure application-wide logging for traceability, reproducibility, and debugging
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
+logging.basicConfig(level=logging.INFO)
 
 
 def main() -> None:
@@ -44,3 +50,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+# Mark successful completing of the simulation for audit trail
+logger.info("Simulation finished successfully.")

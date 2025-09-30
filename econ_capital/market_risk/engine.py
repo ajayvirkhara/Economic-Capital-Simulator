@@ -11,6 +11,11 @@ Provides the MarketRiskEconomicCapital class, which:
 This is the main entry point for running a full market risk capital simulation.
 """
 
+from __future__ import annotations
+import logging
+import time
+import cProfile
+import pstats
 from dataclasses import dataclass
 from typing import Any, Dict, Tuple, Optional
 import numpy as np
@@ -21,35 +26,25 @@ from .covariance import ewma_cov, sample_cov, garch_cov
 from .shocks import mv_t_draws
 from .stats import left_tail_var, left_tail_es
 
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
+
 
 @dataclass
 class MarketRiskEconomicCapital:
-    """Monte Carlo engine for market risk EC (VaR/ES) and Euler allocation.
-
-    Parameters
-    ----------
-    risk_factors : pd.DataFrame
-        T x K return series of the risk factors (columns = factor names).
-    positions : pd.DataFrame
-        Position exposures with rows as positions and columns:
-        - linear deltas per factor:       col = factor name (e.g., "SPY")
-        - optional quadratic gammas:      col = f"gamma_{factor}"
-        - optional vega sensitivities:    col = f"vega_{factor}"
-    config : Dict[str, Any], optional
-        Overrides DEFAULT_CONFIG.
-    """
+    """Monte Carlo engine for market risk EC (VaR/ES) and Euler allocation."""
 
     risk_factors: pd.DataFrame
     positions: pd.DataFrame
     config: Optional[Dict[str, Any]] = None
 
     def __post_init__(self) -> None:
-        # Merge config with defaults
+        # Start profiling init to measure object setup overhead
+        t0 = time.perf_counter()
         cfg = DEFAULT_CONFIG.copy()
         if self.config:
             cfg.update(self.config)
         self.config = cfg
-
         self.rng = np.random.default_rng(self.config["seed"])
 
         # Cache factor names and number of factors
@@ -59,8 +54,20 @@ class MarketRiskEconomicCapital:
         # Build exposures matrices aligned to factor order
         self.delta, self.gamma, self.vega = self._build_exposures()
 
+        # Log initialization timing for reproducibility and performance tracking
+        elapsed = time.perf_counter() - t0
+        logger.info(
+            "Initialized MarketRiskEconomicCapital with %d factors in %.3fs",
+            self.n_factors,
+            elapsed,
+        )
+
     def _build_exposures(self) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """Align delta/gamma/vega columns to factor order (missing → 0)."""
+
+        # Log/debug matrix alignment to ensure deltas, gammas, vegas are correctly reshaped
+        t0 = time.perf_counter()
+
         # Linear (delta)
         delta = self.positions.reindex(columns=self.factor_names).fillna(0.0)
 
@@ -74,10 +81,22 @@ class MarketRiskEconomicCapital:
         vega = self.positions.reindex(columns=vega_cols).fillna(0.0).copy()
         vega.columns = self.factor_names
 
+        elapsed = time.perf_counter() - t0
+        logger.debug(
+            "Built exposures: delta=%s gamma=%s vega=%s elapsed=%.3fs",
+            delta.shape,
+            gamma.shape,
+            vega.shape,
+            elapsed,
+        )
         return delta, gamma, vega
 
     def _estimate_mu_cov(self) -> Tuple[np.ndarray, np.ndarray]:
         """Estimate factor mean vector and covariance according to config."""
+
+        # Profile covariance estimation; critical for performance in large simulations
+        t0 = time.perf_counter()
+
         rf = self.risk_factors.copy().dropna()
 
         mu = (
@@ -97,12 +116,21 @@ class MarketRiskEconomicCapital:
             raise ValueError(f"Unsupported cov_method: {self.config['cov_method']}")
 
         cov = cov_df.to_numpy()
+
         # Numerical jitter for Cholesky stability
         cov += 1e-8 * np.eye(self.n_factors)
+
+        elapsed = time.perf_counter() - t0
+        # Log chosen covariance method and timing to validate config + track cost
+        logger.info("Estimated mu/cov using %s in %.3fs", method, elapsed)
         return mu, cov
 
     def _simulate_shocks(self, n_paths: int) -> np.ndarray:
         """Accumulate daily multivariate t-shocks across the horizon."""
+
+        # Measure simulation runtime (MC typically bottleneck)
+        t0 = time.perf_counter()
+
         mu, cov = self._estimate_mu_cov()
         df = float(self.config["df_t"])
         horizon = int(self.config["horizon_days"])
@@ -110,28 +138,63 @@ class MarketRiskEconomicCapital:
         shocks = np.zeros((n_paths, self.n_factors))
         for _ in range(horizon):
             shocks += mv_t_draws(n_paths, mu, cov, df, self.rng)
+        elapsed = time.perf_counter() - t0
+        logger.info(
+            "Simulated %d shocks over horizon=%d in %.3fs", n_paths, horizon, elapsed
+        )
         return shocks
 
     def _pnl_from_shocks(self, shocks: np.ndarray) -> Tuple[np.ndarray, pd.DataFrame]:
         """Map factor shocks to position P&L and aggregate to portfolio."""
+
+        # Debug  P&L generation
+        t0 = time.perf_counter()
+
         pnl_positions = shocks @ self.delta.to_numpy().T
         pnl_positions += 0.5 * (shocks**2) @ self.gamma.to_numpy().T
         pnl_positions += shocks @ self.vega.to_numpy().T
 
         pnl_portfolio = pnl_positions.sum(axis=1)
         pnl_by_position = pd.DataFrame(pnl_positions, columns=self.positions.index)
+        elapsed = time.perf_counter() - t0
+        logger.debug(
+            "Computed PnL from shocks: n=%d positions=%d elapsed=%.3fs",
+            len(pnl_portfolio),
+            pnl_by_position.shape[1],
+            elapsed,
+        )
         return pnl_portfolio, pnl_by_position
 
     def _allocate_euler_es(
         self, pnl_positions: pd.DataFrame, tail_mask: np.ndarray
     ) -> pd.Series:
         """Euler-ES: contribution = mean tail loss per position (positive = capital)."""
+
+        # Profile Euler allocation to positions
+        t0 = time.perf_counter()
+
         tail_pnl = pnl_positions[tail_mask]
         contrib = -tail_pnl.mean(axis=0)
+        elapsed = time.perf_counter() - t0
+        logger.debug(
+            "Allocated Euler-ES to %d positions in %.3fs", len(contrib), elapsed
+        )
         return contrib
 
     def run(self) -> Dict[str, Any]:
         """Run simulation, return VaR/ES (10D and scaled 1Y) + Euler allocation."""
+
+        # Reproducibility fingerprint (log seed + config snapshot)
+        logger.info(
+            "Starting MarketRiskEconomicCapital run with seed=%s, n_paths=%s, horizon=%s, cov_method=%s",
+            self.config.get("seed"),
+            self.config.get("n_paths"),
+            self.config.get("horizon_days"),
+            self.config.get("cov_method"),
+        )
+
+        # Profile entire run duration for high-level benchmarking
+        t0 = time.perf_counter()
         shocks = self._simulate_shocks(int(self.config["n_paths"]))
         pnl_port, pnl_by_pos = self._pnl_from_shocks(shocks)
 
@@ -148,6 +211,15 @@ class MarketRiskEconomicCapital:
         cutoff = np.quantile(pnl_port, 1.0 - q)
         tail_mask = pnl_port <= cutoff
         contrib = self._allocate_euler_es(pnl_by_pos, tail_mask)
+        elapsed = time.perf_counter() - t0
+        logger.info(
+            "Run completed: VaR10d=%.3f ES10d=%.3f VaR1y=%.3f ES1y=%.3f elapsed=%.3fs",
+            var_10d,
+            es_10d,
+            var_1y,
+            es_1y,
+            elapsed,
+        )
 
         return {
             "var_10d_999": float(var_10d),
@@ -156,3 +228,22 @@ class MarketRiskEconomicCapital:
             "es_1y_999": float(es_1y),
             "capital_breakdown": contrib.sort_values(ascending=False),
         }
+
+
+def profile_run(
+    self, profile_txt: str = "profile.txt", profile_bin: str = "profile.prof"
+) -> Dict[str, Any]:
+    """Profile `run()` with cProfile; write text + binary reports."""
+
+    logger.info("Profiling run() -> %s / %s", profile_txt, profile_bin)
+    profiler = cProfile.Profile()
+    profiler.enable()
+    results = self.run()
+    profiler.disable()
+
+    with open(profile_txt, "w", encoding="utf-8") as fh:
+        stats = pstats.Stats(profiler, stream=fh).sort_stats("cumtime")
+        stats.print_stats(30)
+    profiler.dump_stats(profile_bin)
+    logger.info("Profiling complete; written %s and %s", profile_txt, profile_bin)
+    return results
