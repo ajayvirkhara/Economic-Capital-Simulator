@@ -1,19 +1,6 @@
 """Public API for the Market Risk module."""
 
-from .market_risk import (
-    MarketRiskEconomicCapital,
-    ewma_cov,
-    sample_cov,
-    garch_cov,
-    left_tail_var,
-    left_tail_es,
-)
+from .market_risk import *
 
-__all__ = [
-    "MarketRiskEconomicCapital",
-    "ewma_cov",
-    "sample_cov",
-    "garch_cov",
-    "left_tail_var",
-    "left_tail_es",
-]
+# keep clean namespace for users:
+# e.g. from econ_capital.market_risk import MarketRiskEconomicCapital
