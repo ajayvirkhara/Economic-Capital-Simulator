@@ -1,9 +1,13 @@
-numpy>=1.26
-pandas>=2.2
-yfinance>=0.2
-arch>=6.3
-pyyaml>=6.0
-pytest>=8.0
-pre-commit>=3.7
-black>=24.0
-pylint>=3.2
+# Core scientific stack
+numpy==2.1.1
+pandas==2.2.2
+
+# Risk/finance specific
+yfinance==0.2.40
+arch==6.3.0
+pyyaml==6.0.2
+
+# Testing & linting
+pytest==8.4.2
+black==24.8.0
+pylint==3.2.7
