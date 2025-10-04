@@ -35,7 +35,11 @@ def load_credit_indexes(start="2015-01-01", end=None) -> pd.DataFrame:
         "BAA_yield_pct": "DBAA",
     }
     df = pd.concat(
-        {k: web.DataReader(v, "fred", start, end) for k, v in series.items()}, axis=1
+        [
+            web.DataReader(v, "fred", start, end).rename(columns={v: k})
+            for k, v in series.items()
+        ],
+        axis=1,
     )
     return df.dropna()
 
