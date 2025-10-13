@@ -19,6 +19,7 @@ logger = setup_logging(__name__)
 # Private helpers
 # -----------------------------------------------------------------------
 
+
 def _compute_mtm(trades, market_paths) -> np.ndarray:
     """
     Compute total MTM across all trades and market factors.
