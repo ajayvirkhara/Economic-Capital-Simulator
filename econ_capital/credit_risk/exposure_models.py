@@ -8,36 +8,16 @@ Contains helper methods for:
 """
 
 import numpy as np
-from econ_capital.utils import setup_logging
+
+from econ_capital.utils import validate_shape, setup_logging
 
 from .csa import CSA
 
 logger = setup_logging(__name__)
 
-
 # -----------------------------------------------------------------------
 # Private helpers
 # -----------------------------------------------------------------------
-def _calls_per_year(csa: CSA) -> int:
-    """Determine VM call frequency per year based on CSA configuration."""
-    if getattr(csa, "vm_mode", None) and getattr(csa, "vm_calls", None):
-        mode = getattr(csa, "vm_mode")
-        calls = max(1, int(getattr(csa, "vm_calls") or 1))
-        if mode == "per_day":
-            return int(getattr(csa, "business_days_per_year", 252)) * calls
-        if mode == "per_week":
-            return 52 * calls
-        if mode == "per_year":
-            return calls
-        raise ValueError("CSA.vm_mode must be one of: per_day | per_week | per_year")
-
-    if getattr(csa, "vm_calls_per_day", None):
-        return int(getattr(csa, "business_days_per_year", 252)) * max(
-            1, int(getattr(csa, "vm_calls_per_day"))
-        )
-
-    return 252  # fallback: daily calls
-
 
 def _compute_mtm(trades, market_paths) -> np.ndarray:
     """
@@ -56,8 +36,7 @@ def _compute_mtm(trades, market_paths) -> np.ndarray:
             raise ValueError(f"Trade {tr.name} refers to unknown factor {tr.factor}")
 
         S = market_paths[tr.factor]
-        if S.shape != first_shape:
-            raise ValueError(f"Market path for {tr.factor} has inconsistent shape")
+        validate_shape(S, first_shape, name=f"market_paths[{tr.factor}]")
 
         # Use relative price changes for better dynamics
         rel_dS = (S - S[:, [0]]) / S[:, [0]]
@@ -92,17 +71,21 @@ def _build_collateral_path(mtm: np.ndarray, times: np.ndarray, csa: CSA) -> np.n
 
     _, n_steps = mtm.shape
     collat = np.zeros_like(mtm)
-    calls_py = _calls_per_year(csa)
+    calls_py = csa.calls_per_year()
 
     total_calls = max(1, int(calls_py * times[-1]))
     call_steps = max(1, int(n_steps / total_calls))
 
     im = getattr(csa, "im", 0.0)
+    mta = getattr(csa, "mta", 0.0)
     threshold = getattr(csa, "threshold", 0.0)
 
     for t in range(n_steps):
         if t % call_steps == 0:
-            collat[:, t] = np.clip(mtm[:, t] - threshold, a_min=0, a_max=None) + im
+            call = mtm[:, t] - collat[:, t - 1] - threshold  # net call
+            # Only call if above MTA threshold
+            adj_call = np.where(np.abs(call) > mta, call, 0.0)
+            collat[:, t] = collat[:, t - 1] + adj_call + im
         else:
             collat[:, t] = collat[:, t - 1]
 
