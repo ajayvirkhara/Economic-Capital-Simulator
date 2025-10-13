@@ -52,7 +52,6 @@ def load_real_risk_factors(
     )
     returns = prices.pct_change().dropna()
     returns.columns = list(selected.keys())
-
     return returns
 
 

@@ -8,6 +8,9 @@ factor return distributions, consistent with Basel/EC modelling practice.
 """
 
 import numpy as np
+from econ_capital.utils import setup_logging, validate_shape
+
+logger = setup_logging(__name__)
 
 
 # ---------------------------------------------------------------------
@@ -23,4 +26,12 @@ def mv_t_draws(
     """Draws from a multivariate Student-t via normal/chi-square mixture."""
     g = rng.chisquare(df, size=n) / df  # shape (n,)
     z = rng.multivariate_normal(mean=np.zeros(cov.shape[0]), cov=cov, size=n)
-    return mu + z / np.sqrt(g)[:, None]
+    shocks = mu + z / np.sqrt(g)[:, None]
+    expected_shape = (n, cov.shape[0])
+    validate_shape(shocks, expected_shape, name="shocks")  # ✅ fixed argument order
+    logger.debug(
+        "Generated shocks with mean %.4f and std %.4f",
+        float(shocks.mean()),
+        float(shocks.std()),
+    )
+    return shocks

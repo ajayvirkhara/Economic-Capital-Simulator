@@ -4,6 +4,9 @@ from __future__ import annotations
 from typing import Any, Dict
 from pathlib import Path
 import yaml
+from econ_capital.utils import setup_logging
+
+logger = setup_logging(__name__)
 
 # -------------------------------
 # Simulation defaults

@@ -6,15 +6,12 @@ This script can be executed directly with:
 """
 
 from __future__ import annotations
-import logging
 
+from econ_capital.utils import setup_logging
 from .market_risk import MarketRiskEconomicCapital
 from .data_loaders import load_real_risk_factors, load_dummy_positions
 
-# Configure application-wide logging for traceability, reproducibility, and debugging
-logger = logging.getLogger(__name__)
-logger.addHandler(logging.NullHandler())
-logging.basicConfig(level=logging.INFO)
+logger = setup_logging(__name__)
 
 
 def main() -> None:
@@ -49,6 +46,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    logger.info("Running Market Risk demo")
     main()
 
 # Mark successful completing of the simulation for audit trail

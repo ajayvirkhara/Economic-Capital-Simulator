@@ -15,9 +15,9 @@ Fields
 from __future__ import annotations
 from dataclasses import dataclass
 
-import logging
+from econ_capital.utils import setup_logging
 
-logger = logging.getLogger(__name__)
+logger = setup_logging(__name__)
 
 
 @dataclass
@@ -53,6 +53,7 @@ class CSA:
 
     def calls_per_year(self) -> int:
         """Determine variation margin (VM) call frequency per year."""
+        # Priority 1: Use vm_mode and vm_calls
         if self.vm_mode and self.vm_calls:
             mode = self.vm_mode
             calls = max(1, int(self.vm_calls))
@@ -66,18 +67,19 @@ class CSA:
                 "CSA.vm_mode must be one of: per_day | per_week | per_year"
             )
 
+        # Priority 2: Use vm_calls_per_day (daily frequency based on business days)
         if self.vm_calls_per_day:
             return self.business_days_per_year * max(1, int(self.vm_calls_per_day))
 
-        return 252  # default daily schedule
+        # Default: Assume daily VM calls based on business days
+        return 252
 
-
-def __post_init__(self):
-    """Logging statistics."""
-    logger.debug(
-        "Initialized CSA: threshold=%.3f, mta=%.3f, im=%.3f, vm_mode=%s",
-        getattr(self, "threshold", 0.0),
-        getattr(self, "mta", 0.0),
-        getattr(self, "im", 0.0),
-        getattr(self, "vm_mode", "N/A"),
-    )
+    def __post_init__(self):
+        """Logging statistics."""
+        logger.debug(
+            "Initialized CSA: threshold=%.3f, mta=%.3f, im=%.3f, vm_mode=%s",
+            getattr(self, "threshold", 0.0),
+            getattr(self, "mta", 0.0),
+            getattr(self, "im", 0.0),
+            getattr(self, "vm_mode", "N/A"),
+        )

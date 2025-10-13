@@ -7,12 +7,12 @@ Contains helper methods for:
 - Collateral path generation
 """
 
-import logging
-
 import numpy as np
+from econ_capital.utils import setup_logging
+
 from .csa import CSA
 
-logger = logging.getLogger(__name__)
+logger = setup_logging(__name__)
 
 
 # -----------------------------------------------------------------------

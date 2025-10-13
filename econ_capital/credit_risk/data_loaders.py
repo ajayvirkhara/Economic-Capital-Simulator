@@ -13,6 +13,10 @@ from datetime import datetime
 import pandas as pd
 from pandas_datareader import data as web
 
+from econ_capital.utils import setup_logging
+
+logger = setup_logging(__name__)
+
 # Column schema for issuer-level credit CSVs
 CSV_SCHEMA = [
     "counterparty",

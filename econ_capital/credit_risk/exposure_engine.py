@@ -12,14 +12,15 @@ Notes
 - This engine is *pricing-agnostic*: it uses stylised revaluation functions.
 """
 
-import logging
 import numpy as np
 import pandas as pd
+
+from econ_capital.utils import setup_logging
 
 from .trade_models import NettingSet
 from .exposure_models import _build_collateral_path, _compute_mtm
 
-logger = logging.getLogger(__name__)
+logger = setup_logging(__name__)
 
 
 # ---------------------------------------------------------------------------

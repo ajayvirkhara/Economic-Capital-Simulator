@@ -16,14 +16,13 @@ for the MarketRiskEconomicCapital engine.
 
 from __future__ import annotations
 from typing import Dict
-import logging
 import time
 
 import numpy as np
 import pandas as pd
+from econ_capital.utils import setup_logging
 
-logger = logging.getLogger(__name__)
-logger.addHandler(logging.NullHandler())
+logger = setup_logging(__name__)
 
 
 def ewma_cov(returns: pd.DataFrame, lamb: float) -> pd.DataFrame:

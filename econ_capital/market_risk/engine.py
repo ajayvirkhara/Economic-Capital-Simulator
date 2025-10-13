@@ -12,22 +12,19 @@ This is the main entry point for running a full market risk capital simulation.
 """
 
 from __future__ import annotations
-import logging
 import time
-import cProfile
-import pstats
 from dataclasses import dataclass
 from typing import Any, Dict, Tuple, Optional
 import numpy as np
 import pandas as pd
 
+from econ_capital.utils import setup_logging
 from .config import DEFAULT_CONFIG
 from .covariance import ewma_cov, sample_cov, garch_cov
 from .shocks import mv_t_draws
 from .stats import left_tail_var, left_tail_es
 
-logger = logging.getLogger(__name__)
-logger.addHandler(logging.NullHandler())
+logger = setup_logging(__name__)
 
 
 @dataclass
@@ -228,22 +225,3 @@ class MarketRiskEconomicCapital:
             "es_1y_999": float(es_1y),
             "capital_breakdown": contrib.sort_values(ascending=False),
         }
-
-
-def profile_run(
-    self, profile_txt: str = "profile.txt", profile_bin: str = "profile.prof"
-) -> Dict[str, Any]:
-    """Profile `run()` with cProfile; write text + binary reports."""
-
-    logger.info("Profiling run() -> %s / %s", profile_txt, profile_bin)
-    profiler = cProfile.Profile()
-    profiler.enable()
-    results = self.run()
-    profiler.disable()
-
-    with open(profile_txt, "w", encoding="utf-8") as fh:
-        stats = pstats.Stats(profiler, stream=fh).sort_stats("cumtime")
-        stats.print_stats(30)
-    profiler.dump_stats(profile_bin)
-    logger.info("Profiling complete; written %s and %s", profile_txt, profile_bin)
-    return results
