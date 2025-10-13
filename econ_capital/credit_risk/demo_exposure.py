@@ -35,7 +35,6 @@ def _simulate_sp500_paths(
 
 
 def main():
-    setup_logging(level="INFO")
     set_global_seed(42)
     logger = setup_logging(__name__)
 
