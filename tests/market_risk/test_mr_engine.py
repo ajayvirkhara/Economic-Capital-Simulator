@@ -5,8 +5,7 @@ Unit tests for econ_capital.market_risk.engine module.
 import numpy as np
 import pandas as pd
 
-from econ_capital.market_risk.engine import MarketRiskEconomicCapital
-from econ_capital.market_risk.data_loaders import load_dummy_positions
+from econ_capital.market_risk import MarketRiskEconomicCapital, load_dummy_positions
 
 
 def test_engine_run_outputs():

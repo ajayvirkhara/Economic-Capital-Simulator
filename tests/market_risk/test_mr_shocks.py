@@ -4,7 +4,7 @@ Unit tests for econ_capital.market_risk.shocks module.
 
 import numpy as np
 
-from econ_capital.market_risk.shocks import mv_t_draws
+from econ_capital.market_risk import mv_t_draws
 
 
 def test_mv_t_draws_shape():

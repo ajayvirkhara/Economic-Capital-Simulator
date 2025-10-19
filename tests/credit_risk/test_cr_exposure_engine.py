@@ -4,10 +4,13 @@ Unit tests for econ_capital.credit_risk.exposure_engine
 
 import numpy as np
 
-from econ_capital.credit_risk.trade_models import Trade, NettingSet
-from econ_capital.credit_risk.exposure_engine import ExposureEngine
-from econ_capital.credit_risk.csa import CSA
 from econ_capital.credit_risk.exposure_models import _compute_mtm
+from econ_capital.credit_risk import (
+    Trade,
+    NettingSet,
+    ExposureEngine,
+    CSA,
+)
 from econ_capital.utils import profile_test
 
 

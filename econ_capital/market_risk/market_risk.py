@@ -22,6 +22,7 @@ from .engine import MarketRiskEconomicCapital
 from .covariance import ewma_cov, sample_cov, garch_cov
 from .shocks import mv_t_draws
 from .stats import left_tail_var, left_tail_es
+from .data_loaders import load_dummy_positions
 
 __all__ = [
     "MarketRiskEconomicCapital",
@@ -31,4 +32,5 @@ __all__ = [
     "mv_t_draws",
     "left_tail_var",
     "left_tail_es",
+    "load_dummy_positions",
 ]

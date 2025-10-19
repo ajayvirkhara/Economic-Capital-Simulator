@@ -7,7 +7,7 @@ import tempfile
 import pandas as pd
 import pytest
 
-from econ_capital.credit_risk.data_loaders import (
+from econ_capital.credit_risk import (
     load_dummy_credit_data,
     load_issuer_spreads_csv,
     load_credit_indexes,

@@ -4,7 +4,7 @@ Unit tests for econ_capital.credit_risk.default_model
 
 import numpy as np
 
-from econ_capital.credit_risk.default_model import compute_flat_hazard
+from econ_capital.credit_risk import compute_flat_hazard
 
 
 # Tests that the computed flat hazard rate is positive and constant across all time steps.

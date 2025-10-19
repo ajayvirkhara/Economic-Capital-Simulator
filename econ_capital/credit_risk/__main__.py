@@ -5,7 +5,7 @@ Run with:
 """
 
 from econ_capital.utils import setup_logging, timed_section
-from econ_capital.credit_risk.demo_exposure import main as demo_exposure_main
+from .demo_exposure import main as demo_exposure_main
 
 
 def main():

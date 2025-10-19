@@ -5,7 +5,7 @@ Unit tests for econ_capital.market_risk.covariance module.
 import numpy as np
 import pandas as pd
 
-from econ_capital.market_risk.covariance import ewma_cov
+from econ_capital.market_risk import ewma_cov
 
 
 def test_ewma_cov_symmetry():
