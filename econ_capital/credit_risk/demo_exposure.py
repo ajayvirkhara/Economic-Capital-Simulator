@@ -8,9 +8,14 @@ Run with:
 import numpy as np
 
 from econ_capital.utils import setup_logging, set_global_seed, timed_section
-from econ_capital.credit_risk.trade_models import Trade, NettingSet
-from econ_capital.credit_risk.csa import CSA
-from econ_capital.credit_risk.exposure_engine import ExposureEngine
+from econ_capital.credit_risk import (
+    Trade,
+    NettingSet,
+    CSA,
+    ExposureEngine,
+    compute_counterparty_risk_profiles,
+    aggregate_credit_losses,
+)
 
 
 # pylint: disable=too-many-positional-arguments
@@ -58,6 +63,25 @@ def main():
 
     with timed_section("compute_exposure_profile"):
         _, summary = engine.compute_exposure_profile()
+
+    # Portfolio-level Credit Risk Example
+    counterparties = [
+        {"name": "CPTY_A", "EAD": 100, "PD": 0.02, "LGD": 0.6},
+        {"name": "CPTY_B", "EAD": 150, "PD": 0.015, "LGD": 0.5},
+        {"name": "CPTY_C", "EAD": 120, "PD": 0.01, "LGD": 0.4},
+    ]
+
+    df = compute_counterparty_risk_profiles(counterparties)
+    logger.info("Counterparty EL/UL table:\n%s", df.to_string(index=False))
+
+    corr = np.full((3, 3), 0.3)
+    np.fill_diagonal(corr, 1.0)
+
+    EL_total, UL_total, EC_total = aggregate_credit_losses(df["EL"], df["UL"], corr)
+    print("\n=== Portfolio Credit Capital Summary ===")
+    print(f"Expected Loss (EL): {EL_total:,.2f}")
+    print(f"Unexpected Loss (UL): {UL_total:,.2f}")
+    print(f"Economic Capital (EC): {EC_total:,.2f}")
 
     logger.info("Summary (head):\n%s", summary.head().to_string(index=False))
     print(summary.head())
