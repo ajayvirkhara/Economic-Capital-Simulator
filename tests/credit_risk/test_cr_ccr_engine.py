@@ -25,7 +25,7 @@ def test_aggregate_credit_losses():
     el = np.array([1.2, 0.8, 1.0])
     ul = np.array([2.0, 1.5, 1.2])
     corr = np.eye(3) * 0.5 + 0.5  # simple correlated structure
-    EL_total, UL_total, EC_total = aggregate_credit_losses(el, ul, corr)
+    EL_total, UL_total, EC_total, _ = aggregate_credit_losses(el, ul, corr)
     assert EL_total > 0
     assert UL_total > 0
     assert EC_total > EL_total
@@ -40,11 +40,11 @@ def test_portfolio_diversification_effect():
 
     # ρ = 1 -> perfectly correlated (no diversification)
     corr_full = np.ones((3, 3))
-    _, ul_full, _ = aggregate_credit_losses(el, ul, corr_full)
+    _, ul_full, _, _ = aggregate_credit_losses(el, ul, corr_full)
 
     # ρ = 0 -> fully independent (max diversification)
     corr_indep = np.eye(3)
-    _, ul_indep, _ = aggregate_credit_losses(el, ul, corr_indep)
+    _, ul_indep, _, _ = aggregate_credit_losses(el, ul, corr_indep)
 
     assert ul_indep < ul_full, "UL should be smaller under lower correlations"
     assert ul_full == np.sum(

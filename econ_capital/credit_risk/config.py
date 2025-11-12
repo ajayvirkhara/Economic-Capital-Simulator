@@ -8,4 +8,5 @@ DEFAULT_CONFIG = {
     "recovery_rate": 0.4,
     "default_correlation": 0.2,
     "seed": 42,
+    "corr": 0.2,
 }

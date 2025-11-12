@@ -7,7 +7,7 @@ import numpy as np
 def simulate_credit_factors(
     n_paths: int,
     n_steps: int,
-    rho: float = 0.2,
+    corr: float = 0.2,
     seed: int | None = None,
 ) -> np.ndarray:
     """
@@ -21,4 +21,4 @@ def simulate_credit_factors(
     rng = np.random.default_rng(seed)
     z_sys = rng.standard_normal(n_paths)[:, None]  # (n_paths, 1)
     z_idio = rng.standard_normal((n_paths, n_steps))
-    return rho * z_sys + (np.sqrt(max(0.0, 1.0 - rho**2)) * z_idio)
+    return corr * z_sys + (np.sqrt(max(0.0, 1.0 - corr**2)) * z_idio)
