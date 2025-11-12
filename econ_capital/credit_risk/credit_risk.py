@@ -24,6 +24,10 @@ from .data_loaders import (
     load_credit_indexes,
     CSV_SCHEMA,
 )
+from .allocation import marginal_contribution, allocate_ec
+from .market_model import simulate_credit_factors
+from .wwr import adjust_for_wwr
+from .config import DEFAULT_CONFIG
 
 __all__ = [
     # Trade & exposure structure
@@ -38,6 +42,13 @@ __all__ = [
     # Counterparty credit risk
     "compute_counterparty_risk_profiles",
     "aggregate_credit_losses",
+    # Capital allocation & risk adjustments
+    "marginal_contribution",
+    "allocate_ec",
+    "simulate_credit_factors",
+    "adjust_for_wwr",
+    # Config
+    "DEFAULT_CONFIG",
     # Data utilities
     "load_dummy_credit_data",
     "load_issuer_spreads_csv",

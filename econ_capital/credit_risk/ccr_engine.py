@@ -25,6 +25,9 @@ import pandas as pd
 from scipy.stats import norm
 
 from econ_capital.utils import setup_logging, validate_shape, timed_section
+from econ_capital.credit_risk.config import DEFAULT_CONFIG
+from econ_capital.credit_risk.market_model import simulate_credit_factors
+from econ_capital.credit_risk.wwr import adjust_for_wwr
 
 logger = setup_logging(__name__)
 
@@ -36,8 +39,8 @@ def aggregate_credit_losses(
     el: np.ndarray,
     ul: np.ndarray,
     corr: np.ndarray,
-    confidence: float = 0.999,
-) -> tuple[float, float, float]:
+    confidence: float | None = None,
+) -> tuple[float, float, float, np.ndarray]:
     """
     Aggregate counterparty-level EL and UL into total portfolio capital.
 
@@ -49,7 +52,7 @@ def aggregate_credit_losses(
         Unexpected losses per counterparty (std deviation)
     corr : np.ndarray
         Correlation matrix across counterparties
-    confidence : float
+    confidence : float, optional
         Confidence level for Economic Capital (default=99.9%)
 
     Returns
@@ -57,7 +60,12 @@ def aggregate_credit_losses(
     EL_total : float
     UL_total : float
     EC_total : float
+    alloc : np.ndarray
+        Economic capital allocation per counterparty
     """
+
+    params = DEFAULT_CONFIG.copy()
+    confidence = confidence or params.get("confidence", 0.999)
 
     el = np.asarray(el, dtype=float)
     ul = np.asarray(ul, dtype=float)
@@ -71,6 +79,7 @@ def aggregate_credit_losses(
         el_total = el.sum()
         z = norm.ppf(confidence)
         ec_total = el_total + z * ul_total
+        alloc = ec_total * (el / el.sum())
 
     logger.info(
         "Portfolio Credit Capital computed | EL=%.3f | UL=%.3f | EC=%.3f | z=%.3f",
@@ -79,7 +88,8 @@ def aggregate_credit_losses(
         ec_total,
         z,
     )
-    return el_total, ul_total, ec_total
+    logger.info("Allocated EC per counterparty: %s", alloc)
+    return el_total, ul_total, ec_total, alloc
 
 
 # ----------------------------------------------------------------------
@@ -87,7 +97,8 @@ def aggregate_credit_losses(
 # ----------------------------------------------------------------------
 def compute_counterparty_risk_profiles(counterparties: list[dict]) -> pd.DataFrame:
     """
-    Compute simple EL and UL per counterparty given their EAD, PD, and LGD.
+    Compute EL and UL per counterparty, simulate correlated factors,
+    and apply WWR adjustment.
 
     Parameters
     ----------
@@ -97,11 +108,45 @@ def compute_counterparty_risk_profiles(counterparties: list[dict]) -> pd.DataFra
     Returns
     -------
     pd.DataFrame
-        Columns = [counterparty, EAD, PD, LGD, EL, UL]
+        Columns = [name, EAD, PD, LGD, EL, UL, EL_adj]
     """
+
+    params = DEFAULT_CONFIG.copy()
     df = pd.DataFrame(counterparties)
+
+    # Base expected & unexpected losses
     df["EL"] = df["EAD"] * df["PD"] * df["LGD"]
     df["UL"] = df["EAD"] * np.sqrt(df["PD"] * (1 - df["PD"])) * df["LGD"]
 
-    logger.debug("Computed counterparty EL/UL table:\n%s", df)
+    # Simulate correlated credit factor shocks
+    factors = simulate_credit_factors(
+        n_paths=params["n_paths"],
+        n_steps=len(df),
+        corr=params["corr"],
+        seed=params["seed"],
+    )
+
+    # Map factors into loss shocks (factor ↑ → higher loss)
+    base_losses = df["EL"].values[None, :]
+    shocked_losses = base_losses * (
+        1 + 0.1 * factors
+    )  # 10% sensitivity to factor movement
+    simulated_mean_losses = shocked_losses.mean(axis=0)
+
+    # Reduce factors to a per-counterparty metric (mean over paths)
+    factor_means = factors.mean(axis=0).reshape(1, -1)
+
+    # Use average factor correlation for WWR adjustment
+    wwr_corr = params.get("wwr_corr", 0.2)
+
+    df["EL_adj"] = adjust_for_wwr(
+        simulated_mean_losses.reshape(1, -1),
+        credit_factors=factor_means,
+        sensitivity=wwr_corr,
+    ).ravel()
+
+    # Representative simulated loss metric (mean across paths)
+    df["Simulated_Loss"] = simulated_mean_losses
+
+    logger.debug("Computed counterparty EL/UL/EL_adj table:\n%s", df)
     return df

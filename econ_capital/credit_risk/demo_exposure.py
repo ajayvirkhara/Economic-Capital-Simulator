@@ -1,12 +1,11 @@
 """
-Standalone demo for ExposureEngine using stylised GBM paths.
+Standalone demo for ExposureEngine using stylised GBM paths and integrated Credit Capital components.
 
 Run with:
     python -m econ_capital.credit_risk.demo_exposure
 """
 
 import numpy as np
-
 from econ_capital.utils import setup_logging, set_global_seed, timed_section
 from econ_capital.credit_risk import (
     Trade,
@@ -16,8 +15,13 @@ from econ_capital.credit_risk import (
     compute_counterparty_risk_profiles,
     aggregate_credit_losses,
 )
+from econ_capital.credit_risk.market_model import simulate_credit_factors
+from econ_capital.credit_risk.wwr import adjust_for_wwr
 
 
+# ----------------------------------------------------------------------
+# Simulate simple SP500 price paths (for exposure demonstration)
+# ----------------------------------------------------------------------
 # pylint: disable=too-many-positional-arguments
 def _simulate_sp500_paths(
     n_paths: int,
@@ -39,6 +43,9 @@ def _simulate_sp500_paths(
     return {"SP500": S}
 
 
+# ----------------------------------------------------------------------
+# Main demonstration
+# ----------------------------------------------------------------------
 def main():
     set_global_seed(42)
     logger = setup_logging(__name__)
@@ -64,7 +71,9 @@ def main():
     with timed_section("compute_exposure_profile"):
         _, summary = engine.compute_exposure_profile()
 
-    # Portfolio-level Credit Risk Example
+    # ------------------------------------------------------------------
+    # Counterparty credit capital calculation
+    # ------------------------------------------------------------------
     counterparties = [
         {"name": "CPTY_A", "EAD": 100, "PD": 0.02, "LGD": 0.6},
         {"name": "CPTY_B", "EAD": 150, "PD": 0.015, "LGD": 0.5},
@@ -72,18 +81,32 @@ def main():
     ]
 
     df = compute_counterparty_risk_profiles(counterparties)
-    logger.info("Counterparty EL/UL table:\n%s", df.to_string(index=False))
+    logger.info("Base Counterparty EL/UL:\n%s", df.to_string(index=False))
 
-    corr = np.full((3, 3), 0.3)
+    # Simulate correlated credit factors for WWR illustration
+    factors = simulate_credit_factors(n_paths=5000, n_steps=len(df), seed=42)
+
+    # Apply simple WWR adjustment to expected losses
+    df["EL_WWR"] = adjust_for_wwr(
+        df["EL"].values, credit_factors=factors.mean(axis=0), sensitivity=0.2
+    )
+
+    # Portfolio-level aggregation
+    corr = np.full((len(df), len(df)), 0.3)
     np.fill_diagonal(corr, 1.0)
 
-    EL_total, UL_total, EC_total = aggregate_credit_losses(df["EL"], df["UL"], corr)
+    EL_total, UL_total, EC_total, alloc = aggregate_credit_losses(
+        df["EL_WWR"], df["UL"], corr
+    )
+
     print("\n=== Portfolio Credit Capital Summary ===")
     print(f"Expected Loss (EL): {EL_total:,.2f}")
     print(f"Unexpected Loss (UL): {UL_total:,.2f}")
     print(f"Economic Capital (EC): {EC_total:,.2f}")
+    print(f"Allocated EC per counterparty: {alloc}")
 
-    logger.info("Summary (head):\n%s", summary.head().to_string(index=False))
+    logger.info("Exposure Summary (head):\n%s", summary.head().to_string(index=False))
+    print("\nExposure Summary (head):")
     print(summary.head())
 
 
