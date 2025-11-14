@@ -89,7 +89,9 @@ def fit_lognormal_gpd(
     }
 
 
-def simulate_severity(n_draws: int, params: Dict[str, Any]) -> np.ndarray:
+def simulate_severity(
+    n_draws: int, params: Dict[str, Any], threshold=None
+) -> np.ndarray:
     """
     Simulate severities from fitted hybrid model.
 
