@@ -1,0 +1,30 @@
+# Operational Risk Configuration
+op_risk:
+  frequency:
+    dist: poisson
+    lambda: 0.5
+
+  severity:
+    dist: lognormal
+    mu: 10
+    sigma: 2
+
+  scenarios:
+    cyber_attack:
+      probability: 0.01
+      impact: 1000000
+    fraud:
+      probability: 0.02
+      impact: 500000
+    system_outage:
+      probability: 0.03
+      impact: 200000
+
+  insurance:
+    coverage: 500000
+    deductible: 10000
+
+  stress_tests:
+    extreme_event:
+      severity_multiplier: 3
+      frequency_multiplier: 2
