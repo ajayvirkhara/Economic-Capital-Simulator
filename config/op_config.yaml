@@ -3,11 +3,14 @@ op_risk:
   frequency:
     dist: poisson
     lambda: 0.5
+    data_path: "C:/Users/Ajay/OneDrive/Desktop/Ajay's Stuff/MSc + Other Files/Economic Capital Simulator/econ_capital/op_risk/data/freq_data.csv"
+
 
   severity:
     dist: lognormal
     mu: 10
     sigma: 2
+    data_path: "C:/Users/Ajay/OneDrive/Desktop/Ajay's Stuff/MSc + Other Files/Economic Capital Simulator/econ_capital/op_risk/data/sev_data.csv"
 
   scenarios:
     cyber_attack:
