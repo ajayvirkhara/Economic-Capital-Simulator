@@ -6,7 +6,7 @@ Defines enums, parameter dataclasses, defaults, and custom exceptions.
 from __future__ import annotations
 from enum import Enum
 from dataclasses import dataclass
-from typing import TypedDict, Optional
+from typing import Dict, Optional
 
 
 # ----------------------------------------------------------------------
@@ -91,9 +91,4 @@ DEFAULT_GPD_THRESHOLD = 10000.0
 # ----------------------------------------------------------------------
 
 
-class ConfigDict(TypedDict, total=False):
-    name: str
-    frequency_model: str
-    severity_model: str
-    lambda_: float
-    threshold: float
+ConfigDict = Dict[str, object]
