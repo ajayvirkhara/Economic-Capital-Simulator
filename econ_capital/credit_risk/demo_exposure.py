@@ -6,6 +6,7 @@ Run with:
 """
 
 import numpy as np
+import pandas as pd
 from econ_capital.utils import setup_logging, set_global_seed, timed_section
 from econ_capital.credit_risk import (
     Trade,
@@ -74,13 +75,19 @@ def main():
     # ------------------------------------------------------------------
     # Counterparty credit capital calculation
     # ------------------------------------------------------------------
-    counterparties = [
-        {"name": "CPTY_A", "EAD": 100, "PD": 0.02, "LGD": 0.6},
-        {"name": "CPTY_B", "EAD": 150, "PD": 0.015, "LGD": 0.5},
-        {"name": "CPTY_C", "EAD": 120, "PD": 0.01, "LGD": 0.4},
-    ]
-
-    df = compute_counterparty_risk_profiles(counterparties)
+    df = pd.DataFrame(
+        [
+            {
+                "name": "CPTY_A",
+                "EAD": summary["EAD_final"].iloc[-1],
+                "PD": 0.02,
+                "LGD": 0.6,
+            },
+            {"name": "CPTY_B", "EAD": 150, "PD": 0.015, "LGD": 0.5},
+            {"name": "CPTY_C", "EAD": 120, "PD": 0.01, "LGD": 0.4},
+        ]
+    )
+    df = compute_counterparty_risk_profiles(df)
     logger.info("Base Counterparty EL/UL:\n%s", df.to_string(index=False))
 
     # Simulate correlated credit factors for WWR illustration

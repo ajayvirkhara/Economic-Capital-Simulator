@@ -115,8 +115,9 @@ def compute_counterparty_risk_profiles(counterparties: list[dict]) -> pd.DataFra
     df = pd.DataFrame(counterparties)
 
     # Base expected & unexpected losses
-    df["EL"] = df["EAD"] * df["PD"] * df["LGD"]
-    df["UL"] = df["EAD"] * np.sqrt(df["PD"] * (1 - df["PD"])) * df["LGD"]
+    EAD_col = "EAD" if "EAD" in df.columns else "EAD_final"
+    df["EL"] = df[EAD_col] * df["PD"] * df["LGD"]
+    df["UL"] = df[EAD_col] * np.sqrt(df["PD"] * (1 - df["PD"])) * df["LGD"]
 
     # Simulate correlated credit factor shocks
     factors = simulate_credit_factors(

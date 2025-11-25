@@ -83,11 +83,13 @@ def test_vm_and_im_effects():
 
 
 def test_summary_dataframe_structure():
-    # Tests that the output summary DataFrame contains the required columns (time, EE, EPE_cum) and that the Cumulative Expected Positive Exposure (EPE_cum) is monotonically non-decreasing.
+    # Tests that the output summary DataFrame contains the required columns (EAD, EAD_final) and that the Cumulative Expected Positive Exposure (EPE_cum) is monotonically non-decreasing.
     times, market_paths = simulate_dummy_market()
     tr = Trade(name="IRS_like", factor="SP500", w=1.0)
     ns = NettingSet(counterparty="Z", trades=[tr], csa=CSA())
     engine = ExposureEngine(ns, market_paths, times)
     _, summary = engine.compute_exposure_profile()
-    assert {"time", "EE", "EPE_cum"}.issubset(summary.columns)
+    assert "EAD" in summary.columns
+    assert "EAD_final" in summary.columns
+    assert np.allclose(summary["EAD"], engine.alpha_factor * summary["EPE_cum"])
     assert np.all(np.diff(summary["EPE_cum"]) >= -1e-6)

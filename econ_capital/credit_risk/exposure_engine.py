@@ -29,17 +29,20 @@ logger = setup_logging(__name__)
 class ExposureEngine:
     """Computes MTM, collateral, and exposure metrics for a given netting set."""
 
+    # pylint: disable=too-many-positional-arguments
     def __init__(
         self,
         netting_set: NettingSet,
         market_paths: dict[str, np.ndarray],
         times: np.ndarray,
         pfe_quantile: float = 0.975,
+        alpha_factor: float = 1.4,
     ):
         self.netting_set = netting_set
         self.market_paths = market_paths
         self.times = np.asarray(times, dtype=float)
         self.pfe_quantile = pfe_quantile
+        self.alpha_factor = alpha_factor
 
     # -----------------------------------------------------------------------
     # Public API
@@ -92,18 +95,26 @@ class ExposureEngine:
         den = np.maximum(np.cumsum(_dt), 1e-12)
         EPE_cum = num / den
 
+        # --- Apply Alpha factor to the final EPE_cum value ---
+        EAD_final = EPE_cum[-1] * self.alpha_factor
+        # Apply EAD to all time steps for consistency/tracking
+        EAD = EPE_cum * self.alpha_factor
+
         _summary = pd.DataFrame(
             {
                 "time": self.times,
                 "EE": EE,
                 f"PFE_{int(100 * self.pfe_quantile)}": PFE,
                 "EPE_cum": EPE_cum,
+                "EAD": EAD,
+                "EAD_final": EAD_final,
             }
         )
 
         logger.info(
-            "Exposure computation done: EPE_cum_final=%.3f, PFE_97.5%%_final=%.3f",
+            "Exposure computation done: EPE_cum_final=%.3f, EAD_final=%.3f, PFE_97.5%%_final=%.3f",
             float(_summary["EPE_cum"].iloc[-1]),
+            float(EAD_final),
             float(_summary.filter(like="PFE").iloc[-1].values[0]),
         )
         return exposure, _summary

@@ -9,4 +9,5 @@ DEFAULT_CONFIG = {
     "default_correlation": 0.2,
     "seed": 42,
     "corr": 0.2,
+    "alpha_factor": 1.4,
 }
