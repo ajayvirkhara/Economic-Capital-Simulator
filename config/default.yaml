@@ -1,0 +1,11 @@
+# Global configuration
+global:
+  seed: 42
+  logging:
+    level: INFO
+    format: "[%(levelname)s] %(name)s: %(message)s"
+
+simulation:
+  default_n_paths: 5000
+  default_time_steps: 6
+  default_horizon_years: 1.0

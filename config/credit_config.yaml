@@ -1,0 +1,31 @@
+# Credit Risk Configuration
+n_paths: 5000
+seed: 42
+
+# Correlation structure used in credit factor simulation
+corr:
+  - [1.0, 0.2, 0.2]
+  - [0.2, 1.0, 0.2]
+  - [0.2, 0.2, 1.0]
+
+# WWR sensitivity multiplier for adjust_for_wwr()
+wwr_corr: 0.2
+
+# Exposure engine parameters
+exposure_engine:
+  pfe_quantile: 0.975
+  alpha_factor: 1.4 # Alpha factor (Basel: 1.4 for EAD = alpha × EPE)
+
+# Default PD clipping for hazard-rate models
+pd_min: 1e-6
+pd_max: 0.30
+
+# LGD assumptions
+lgd_floor: 0.1
+lgd_ceiling: 0.75
+
+# Credit factor simulation
+market_model:
+  vol: 0.20
+  mean_reversion: 0.00
+  shock_scale: 0.10
