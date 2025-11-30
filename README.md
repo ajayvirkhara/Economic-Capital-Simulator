@@ -56,7 +56,6 @@ Each risk type can be executed and validated independently, with shared utilitie
 │ │ ├── allocation.py         # Capital allocation (Euler, proportional)
 │ │ ├── ccr_engine.py         # Credit capital integration engine
 │ │ ├── config.py             # Credit module config loader (e.g., config checks)
-│ │ ├── credit_risk.py        # Orchestration script for credit_risk engine
 │ │ ├── csa.py                # Credit Support Annex (CSA) logic
 │ │ ├── data_loaders.py       # Credit spreads, indices, dummy data
 │ │ ├── default_model.py      # Default and recovery modelling
@@ -66,19 +65,18 @@ Each risk type can be executed and validated independently, with shared utilitie
 │ │ ├── market_model.py       # Credit spread and macro driver integration
 │ │ ├── trade_models.py       # Stylised trades and netting sets
 │ │ ├── wwr.py                # Wrong-way risk (WWR) extensions
-│ │ ├── __init__.py
-│ │ └── __main__.py
+│ │ ├── __init__.py           # Exposes the public API
+│ │ └── __main__.py           # Module entry point
 │ │
 │ ├── market_risk/            # Market Risk
 │ │ ├── config.py             # Market module config loader
 │ │ ├── covariance.py         # EWMA/GARCH covariance models
 │ │ ├── data_loaders.py       # Factor and pricing data ingestion
 │ │ ├── engine.py             # Monte Carlo risk engine
-│ │ ├── market_risk.py        # Driver script for market_risk engine
 │ │ ├── shocks.py             # Multivariate t-copula simulation
 │ │ ├── stats.py              # VaR, ES, and backtesting functions
-│ │ ├── __init__.py
-│ │ └── __main__.py
+│ │ ├── __init__.py           # Exposes the public API
+│ │ └── __main__.py           # Module entry point
 │ │
 │ ├── op_risk/                # Operational Risk (OpRisk)
 │ │ ├── data/                 # Example/sample loss data files
@@ -90,14 +88,13 @@ Each risk type can be executed and validated independently, with shared utilitie
 │ │ ├── frequency_models.py   # Poisson / Negative Binomial frequency models
 │ │ ├── insurance.py          # Risk transfer (insurance) adjustments
 │ │ ├── lda_engine.py         # Loss Distribution Approach (LDA) simulation engine
-│ │ ├── op_risk.py            # Driver script for op_risk engine
 │ │ ├── reporting.py          # Capital summary generation
 │ │ ├── scenarios.py          # Scenario-based stress tests
 │ │ ├── severity_models.py    # Lognormal, Pareto, EVT tail fitting
 │ │ ├── stress_tests.py       # Scenario and sensitivity extensions
 │ │ ├── utils.py              # Helper functions for data/plots
-│ │ ├── __init__.py
-│ │ └── __main__.py
+│ │ ├── __init__.py           # Exposes the public API
+│ │ └── __main__.py           # Module entry point
 │ │
 │ ├── aggregate.py            # Portfolio-level aggregation across risk stripes
 │ ├── utils.py                # Shared logging, profiling, and helpers
@@ -267,7 +264,7 @@ Licensed under the **MIT License** - free for educational and research use with 
 
 ## 👤 Author
 
-**Ajayvir Khara**  
+**Ajayvir Khara**
 *MSc Finance | FRM Level II Candidate*
 
 * LinkedIn: [LinkedIn](https://www.linkedin.com/in/ajayvirkhara)
