@@ -45,7 +45,7 @@ def prepare_models(config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     try:
         if not Path(config["frequency"]["data_path"]).exists():
             raise FileNotFoundError(
-                f"Frequency data not found at {config["frequency"]["data_path"]}"
+                f"Frequency data not found at {config['frequency']['data_path']}"
             )
         freq_df = load_frequency_data(
             config["frequency"]["data_path"]
@@ -170,17 +170,17 @@ def compute_capital_metrics(
     metrics = {}
     for level in levels:
         var = np.percentile(sorted_losses, level * 100)  # Empirical VaR
-        metrics[f"VaR_{int(level*100)}"] = var
+        metrics[f"VaR_{int(level * 100)}"] = var
         tail_start = int((1 - es_alpha) * len(sorted_losses))  # Tail index
         es = (
             np.mean(sorted_losses[tail_start:])
             if tail_start < len(sorted_losses)
             else var
         )
-        metrics[f"ES_{int(es_alpha*100)}"] = es  # Conditional tail mean
+        metrics[f"ES_{int(es_alpha * 100)}"] = es  # Conditional tail mean
 
     # Step 4: Alias TVaR to ES; add descriptives
-    metrics["TVaR_99.9"] = metrics[f"ES_{int(es_alpha*100)}"]
+    metrics["TVaR_99.9"] = metrics[f"ES_{int(es_alpha * 100)}"]
     metrics["Mean_Loss"] = np.mean(loss_distribution)
     metrics["Std_Loss"] = np.std(loss_distribution)
 

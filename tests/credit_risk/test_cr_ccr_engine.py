@@ -47,6 +47,6 @@ def test_portfolio_diversification_effect():
     _, ul_indep, _, _ = aggregate_credit_losses(el, ul, corr_indep)
 
     assert ul_indep < ul_full, "UL should be smaller under lower correlations"
-    assert ul_full == np.sum(
-        ul
-    ), "When ρ=1, portfolio UL should equal sum of individual ULs (no diversification)"
+    assert ul_full == np.sum(ul), (
+        "When ρ=1, portfolio UL should equal sum of individual ULs (no diversification)"
+    )

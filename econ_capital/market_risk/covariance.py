@@ -68,8 +68,7 @@ def garch_vols(returns: pd.DataFrame) -> pd.Series:
         from arch import arch_model  # pylint: disable=import-outside-toplevel
     except Exception as exc:
         raise ImportError(
-            "GARCH selected but 'arch' is not installed. "
-            "Install with: pip install arch"
+            "GARCH selected but 'arch' is not installed. Install with: pip install arch"
         ) from exc
 
     vols: Dict[str, float] = {}
@@ -81,7 +80,7 @@ def garch_vols(returns: pd.DataFrame) -> pd.Series:
         # returns in %, arch expects relatively larger magnitudes
         am = arch_model(returns[col] * 100.0, vol="Garch", p=1, q=1)
         res = am.fit(disp="off")
-        vols[col] = float(res.conditional_volatility.iloc[-1]) / 100.0
+        vols[col] = float(res.conditional_volatility.iloc[-1].iloc[0]) / 100.0
         logger.debug("Fitted GARCH for %s: vol=%.5f", col, vols[col])
 
     elapsed = time.perf_counter() - t0
