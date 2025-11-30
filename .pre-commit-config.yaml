@@ -1,0 +1,26 @@
+repos:
+  # Ruff
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.6
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  # Pytest
+  - repo: local
+    hooks:
+      - id: pytest-check
+        name: Run all tests
+        entry: pytest
+        language: system
+        pass_filenames: false
+        always_run: true
+        types: [python]
+        args:
+          - --cov=econ_capital          # measure coverage of code
+          - --cov-config=.coveragerc    # coverage testing settings
+          - --cov-fail-under=90         # fail commit if coverage drops
+          - --cov-report=term-missing   # if failed show which lines are missing
+          - --maxfail=1                 # stop on first failure
+          - --tb=short                  # clean traceback
