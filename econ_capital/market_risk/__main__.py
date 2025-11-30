@@ -8,7 +8,7 @@ This script can be executed directly with:
 from __future__ import annotations
 
 from econ_capital.utils import setup_logging
-from .market_risk import MarketRiskEconomicCapital
+from .engine import MarketRiskEconomicCapital
 from .data_loaders import load_real_risk_factors, load_dummy_positions
 
 logger = setup_logging(__name__)
