@@ -3,14 +3,18 @@ op_risk:
   frequency:
     dist: poisson
     lambda: 0.5
-    data_path: "C:/Users/Ajay/OneDrive/Desktop/Ajay's Stuff/MSc + Other Files/Economic Capital Simulator/econ_capital/op_risk/data/freq_data.csv"
-
+    multiplier: 5
+    data_path: "econ_capital/op_risk/data/freq_data.csv"
 
   severity:
     dist: lognormal
-    mu: 10
+    mu: 1
+    mu_shift: 0.05
+    scale_multiplier: 0.05
     sigma: 2
-    data_path: "C:/Users/Ajay/OneDrive/Desktop/Ajay's Stuff/MSc + Other Files/Economic Capital Simulator/econ_capital/op_risk/data/sev_data.csv"
+    data_path: "econ_capital/op_risk/data/sev_data.csv"
+    GPD_THRESHOLD: 150000
+    use_fitted: true
 
   scenarios:
     cyber_attack:
@@ -24,10 +28,18 @@ op_risk:
       impact: 200000
 
   insurance:
-    coverage: 500000
+    enabled: false
+    coverage: 50000
     deductible: 10000
 
   stress_tests:
     extreme_event:
-      severity_multiplier: 3
-      frequency_multiplier: 2
+      severity_multiplier: 10
+      frequency_multiplier: 5
+
+  simulation:
+    num_simulations: 100000
+    confidence_level: 0.999
+    random_seed: 40
+    VAR_LEVELS: [0.95, 0.99, 0.995, 0.999]
+    ES_ALPHA: 0.995
