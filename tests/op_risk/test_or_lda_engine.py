@@ -3,6 +3,7 @@ from pathlib import Path
 import os
 import pytest
 import numpy as np
+import pandas as pd
 from pytest import raises
 
 # Module under test
@@ -20,22 +21,28 @@ from econ_capital.op_risk.lda_engine import (
 @pytest.fixture(name="config_fx", scope="module")
 def fixture_config():
     """
-    Provides a config dictionary for LDA tests using CSVs in op_risk/data/.
+    Provides a nested config dictionary for LDA tests using CSVs in op_risk/data/.
     Assumes sample data files exist (or are created via setup).
     """
     return {
-        "GPD_THRESHOLD": 0,
-        "NUM_SIMULATIONS": 5,
         "frequency": {
+            "data_path": "econ_capital/op_risk/data/freq_data.csv",
             "dist": "poisson",
             "lambda": 1.0,
-            "data_path": "econ_capital/op_risk/data/freq_data.csv",
         },
         "severity": {
+            "data_path": "econ_capital/op_risk/data/sev_data.csv",
             "dist": "lognormal",
             "mu": 100,
             "sigma": 50,
-            "data_path": "econ_capital/op_risk/data/sev_data.csv",
+            "GPD_THRESHOLD": 100_000,
+        },
+        "simulation": {
+            "num_simulations": 5_000,
+            "random_seed": 42,
+        },
+        "insurance": {
+            "enabled": False,
         },
     }
 
@@ -46,18 +53,24 @@ def fixture_empty_config():
     Provides a config dictionary pointing to empty CSVs in op_risk/data/ with proper column structure.
     """
     return {
-        "GPD_THRESHOLD": 0,
-        "NUM_SIMULATIONS": 5,
         "frequency": {
+            "data_path": "econ_capital/op_risk/data/empty_freq.csv",
             "dist": "poisson",
             "lambda": 1.0,
-            "data_path": "econ_capital/op_risk/data/empty_freq.csv",
         },
         "severity": {
+            "data_path": "econ_capital/op_risk/data/empty_sev.csv",
             "dist": "lognormal",
             "mu": 100,
             "sigma": 50,
-            "data_path": "econ_capital/op_risk/data/empty_sev.csv",
+            "GPD_THRESHOLD": 100_000,
+        },
+        "simulation": {
+            "num_simulations": 5_000,
+            "random_seed": 42,
+        },
+        "insurance": {
+            "enabled": False,
         },
     }
 
@@ -143,11 +156,11 @@ def test_run_full_pipeline_real_data(config_fx):
     """
     loss_dist, fitted_models, metrics = lda_run_engine(config_fx)
     assert isinstance(loss_dist, np.ndarray)
-    assert len(loss_dist) == config_fx["NUM_SIMULATIONS"]
+    assert len(loss_dist) == config_fx["simulation"]["num_simulations"]
     assert isinstance(fitted_models, dict)
     assert isinstance(metrics, dict)
     # Basic checks on outputs
-    assert "VaR_99" in metrics  # Assuming standard metrics are computed
+    assert "VaR_990" in metrics or "VaR_999" in metrics  # Per-mille naming
     assert np.all(loss_dist >= 0)  # Losses non-negative
 
 
@@ -161,7 +174,7 @@ def test_prepare_models_with_empty_df(empty_config):
     Validate behaviour when loaders return empty datasets (no rows, but proper columns) from op_risk/data/.
     Expects ValueError on no common UoMs.
     """
-    with raises(ValueError, match="No common UoMs."):  # UPDATED: Expect explicit error
+    with raises(ValueError, match="No common UoMs."):
         prepare_models(empty_config)
 
 
@@ -169,7 +182,7 @@ def test_fit_distributions_without_data(empty_config):
     """
     Ensure prepare_models raises on empty data (no common UoMs).
     """
-    with raises(ValueError, match="No common UoMs."):  # UPDATED: Expect explicit error
+    with raises(ValueError, match="No common UoMs."):
         prepare_models(empty_config)
 
 
@@ -200,4 +213,79 @@ def test_severity_simulation(config_fx):
     out = run_monte_carlo_simulation(mock_models, config_fx)
     assert isinstance(out, np.ndarray)
     # Assuming aggregated losses across UoMs/paths; length matches simulations
-    assert len(out) == config_fx["NUM_SIMULATIONS"]
+    assert len(out) == config_fx["simulation"]["num_simulations"]
+
+
+def test_numerical_stability_handles_nan_inf_and_clipping(config_fx, monkeypatch):
+    def mock_sim(*args, **kwargs):
+        return np.array([np.nan, np.inf, -1e10, 2e16, 1e15, 0])
+
+    monkeypatch.setattr(
+        "econ_capital.op_risk.lda_engine.run_monte_carlo_simulation", mock_sim
+    )
+
+    loss_dist, _, _ = lda_run_engine(config_fx)
+    assert not np.any(np.isnan(loss_dist))
+    assert not np.any(np.isinf(loss_dist))
+    assert np.all(loss_dist >= 0)
+    assert np.all(loss_dist <= 1e15)
+
+
+def test_full_insurance_mitigation_path(config_fx):
+    config_fx["insurance"] = {
+        "enabled": True,
+        "coverage": 100_000,
+        "deductible": 10_000,
+        "coverage_pct": 0.9,
+        "agg_limit": 1_000_000,
+        "agg_deductible": 50_000,
+    }
+
+    models = {
+        "UoM1": {
+            "freq_params": {"lambda": 10.0, "model_type": "poisson"},
+            "sev_params": {
+                "lognormal_mu": 11.0,  # ~60k per loss
+                "lognormal_sigma": 1.0,
+                "threshold": 100_000,
+                "tail_prob": 0.05,
+                "gpd_xi": 0.0,
+                "gpd_beta": 50_000.0,
+            },
+        }
+    }
+    config_fx["simulation"]["num_simulations"] = 1000
+
+    losses = run_monte_carlo_simulation(models, config_fx)
+    # With insurance, losses should be significantly reduced
+    no_ins_cfg = config_fx.copy()
+    no_ins_cfg["insurance"]["enabled"] = False
+    losses_no_ins = run_monte_carlo_simulation(models, no_ins_cfg)
+
+    assert losses.mean() < losses_no_ins.mean() * 0.7  # at least 30% reduction
+
+
+def test_negative_binomial_branch_is_reachable(config_fx, monkeypatch):
+    config_fx["frequency"]["dist"] = "negative_binomial"
+
+    # Make data have variance > mean to avoid fallback
+    mock_freq_df = pd.DataFrame(
+        {
+            "UoM": ["UoM1"] * 10,
+            "Count": [0, 0, 0, 0, 1, 2, 3, 5, 8, 15],  # mean ~3.4, var high
+        }
+    )
+    mock_sev_df = pd.DataFrame(
+        {"UoM": ["UoM1"] * 5, "Loss_Amount": [1000, 2000, 3000, 4000, 5000]}
+    )
+
+    monkeypatch.setattr(
+        "econ_capital.op_risk.lda_engine.load_frequency_data", lambda x: mock_freq_df
+    )
+    monkeypatch.setattr(
+        "econ_capital.op_risk.lda_engine.load_severity_data", lambda x: mock_sev_df
+    )
+
+    # Should raise NotImplementedError from the branch
+    with pytest.raises(NotImplementedError):
+        prepare_models(config_fx)

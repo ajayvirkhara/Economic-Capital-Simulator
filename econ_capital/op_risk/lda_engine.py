@@ -71,7 +71,7 @@ def prepare_models(config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
 
     # Step 4: Initialize dict for fitted models and get model type from config
     fitted_models = {}
-    freq_model_type = config.get("FREQ_MODEL", "poisson")
+    freq_model_type = config.get("frequency", {}).get("dist", "poisson").lower()
 
     # Step 5: Loop over each UoM to fit models
     for uom in uoms:
@@ -90,16 +90,30 @@ def prepare_models(config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
                     freq_lambda = 0.1
                 else:
                     if freq_model_type == "poisson":
-                        freq_lambda = fit_poisson(
-                            uom_freq
-                        )  # External fitter (e.g., np.mean for Poisson)
-                    else:
+                        freq_lambda = fit_poisson(uom_freq)
+                    elif freq_model_type == "negative_binomial":
+                        mean = np.mean(uom_freq)
+                        var = np.var(uom_freq)
+                        if var > mean + 1e-8:  # avoid division by zero
+                            p = mean / var
+                            r = mean * p / (1 - p)
+                        else:
+                            p = 0.5
+                            r = mean / (1 - p)  # fallback
+                        # Store r and p — will be used when we enable NB simulation
+                        freq_params = {
+                            "r": float(r),
+                            "p": float(p),
+                            "model_type": freq_model_type,
+                        }
                         raise NotImplementedError(
                             f"Model '{freq_model_type}' unsupported."
                         )
 
                 # Step 5b: Fit severity model (hybrid Lognormal body + GPD tail)
-                threshold = config.get("GPD_THRESHOLD", 100000)
+                threshold_default = config.get("severity", {}).get(
+                    "GPD_THRESHOLD", 100000
+                )
                 if len(uom_sev) < 10:
                     logger.warning(
                         "UoM %s: Sparse sev data; simple Lognormal defaults", uom
@@ -107,16 +121,16 @@ def prepare_models(config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
                     mean_loss = np.mean(uom_sev) if len(uom_sev) > 0 else 10000.0
                     sev_params = {
                         "lognormal_mu": np.log(mean_loss),
-                        "lognormal_sigma": 1.0,
+                        "lognormal_sigma": 1.5,
                         "gpd_xi": 0.0,
                         "gpd_beta": mean_loss,
-                        "threshold": threshold,
+                        "threshold": threshold_default,
                     }
                 else:
                     sev_params = fit_lognormal_gpd(
-                        uom_sev, threshold=threshold
+                        uom_sev, threshold=threshold_default
                     )  # External hybrid fitter
-                    sev_params["threshold"] = threshold
+                    sev_params["threshold"] = threshold_default
 
                 # Step 5c: Compute historical Expected Loss (EL) as benchmark
                 historical_el = (
@@ -124,11 +138,22 @@ def prepare_models(config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
                 )
 
                 # Step 5d: Store fitted params for this UoM
-                fitted_models[uom] = {
-                    "freq_params": {
-                        "lambda": freq_lambda,
+                if freq_model_type == "poisson":
+                    freq_params = {
+                        "lambda": float(freq_lambda),
                         "model_type": freq_model_type,
-                    },
+                    }
+                elif freq_model_type == "negative_binomial":
+                    freq_params = {
+                        "r": float(r),
+                        "p": float(p),
+                        "model_type": freq_model_type,
+                    }
+                else:
+                    raise ValueError(f"Unsupported frequency model: {freq_model_type}")
+
+                fitted_models[uom] = {
+                    "freq_params": freq_params,
                     "sev_params": sev_params,
                     "historical_el": historical_el,
                 }
@@ -140,7 +165,7 @@ def prepare_models(config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     # Step 6: Validate at least one model fitted; log summary
     if not fitted_models:
         raise ValueError("No models fitted.")
-    logger.info("Fitting complete for {len(fitted_models)} UoMs.")
+    logger.info("Fitting complete for %d UoMs.", len(fitted_models))
     return fitted_models
 
 
@@ -162,25 +187,41 @@ def compute_capital_metrics(
         raise ValueError("Empty distribution.")
 
     # Step 2: Get config levels (e.g., Basel 99.9% VaR)
-    levels = config.get("VAR_LEVELS", [0.95, 0.99, 0.999])
-    es_alpha = config.get("ES_ALPHA", 0.995)
+    levels = config.get("simulation", {}).get("VAR_LEVELS", [0.95, 0.99, 0.999])
+    es_alpha = config.get("simulation", {}).get("ES_ALPHA", 0.995)
     sorted_losses = np.sort(loss_distribution)  # Sort once for efficiency
 
     # Step 3: Compute VaR and ES for each level
     metrics = {}
     for level in levels:
-        var = np.percentile(sorted_losses, level * 100)  # Empirical VaR
-        metrics[f"VaR_{int(level * 100)}"] = var
-        tail_start = int((1 - es_alpha) * len(sorted_losses))  # Tail index
-        es = (
-            np.mean(sorted_losses[tail_start:])
-            if tail_start < len(sorted_losses)
-            else var
+        # level is e.g. 0.95, 0.99, 0.999
+        per_mille = int(round(level * 1000))  # 0.999 -> 999
+        var = np.percentile(sorted_losses, level * 100)
+        metrics[f"VaR_{per_mille}"] = float(var)
+    # ES: use es_alpha per-mille
+    es_per_mille = int(round(es_alpha * 1000))
+    tail_start = int((1 - es_alpha) * len(sorted_losses))
+    es_val = float(
+        np.mean(sorted_losses[tail_start:])
+        if tail_start < len(sorted_losses)
+        else metrics.get(f"VaR_{per_mille}", var)
+    )
+    metrics[f"ES_{es_per_mille}"] = es_val
+
+    # canonical aliases expected by reporting/stress pipeline
+    if f"VaR_{int(0.999 * 1000)}" in metrics:
+        metrics["capital_999"] = metrics[f"VaR_{int(0.999 * 1000)}"]
+    else:
+        metrics["capital_999"] = metrics.get(
+            next((k for k in metrics if k.startswith("VaR_")), None), np.nan
         )
-        metrics[f"ES_{int(es_alpha * 100)}"] = es  # Conditional tail mean
+
+    metrics["expected_loss"] = float(np.mean(loss_distribution))
+    metrics["mean_loss"] = float(np.mean(loss_distribution))
+    metrics["std_loss"] = float(np.std(loss_distribution))
 
     # Step 4: Alias TVaR to ES; add descriptives
-    metrics["TVaR_99.9"] = metrics[f"ES_{int(es_alpha * 100)}"]
+    metrics["TVaR_99.9"] = metrics[f"ES_{int(round(es_alpha * 1000))}"]
     metrics["Mean_Loss"] = np.mean(loss_distribution)
     metrics["Std_Loss"] = np.std(loss_distribution)
 
@@ -193,20 +234,18 @@ def run_monte_carlo_simulation(
     fitted_models: Dict[str, Dict[str, Any]], config: Dict[str, Any]
 ) -> np.ndarray:
     """
-    Vectorized MC: Sim freq/sev per UoM, aggregate totals.
-
-    Args:
-        fitted_models: Per-UoM params.
-        config: With 'NUM_SIMULATIONS', 'SEED', limits.
+    Vectorized MC: Sim freq/sev per UoM, aggregate totals.Args:
+    fitted_models: Per-UoM params.
+    config: With 'num_simulations', 'SEED', limits.
 
     Returns:
-        Total loss dist array.
+    Total loss dist array.
     """
     # Step 1: Validate and seed for reproducibility
-    num_simulations = config.get("NUM_SIMULATIONS", 0)
+    num_simulations = config.get("simulation", {}).get("num_simulations", 250000)
     if num_simulations <= 0:
-        raise ValueError("NUM_SIMULATIONS must be > 0")
-    np.random.seed(config.get("SEED", 42))
+        raise ValueError("num_simulations must be > 0")
+    np.random.seed(config.get("simulation", {}).get("random_seed", 42))
 
     # Step 2: Initialize total loss array and extract UoMs
     total_loss_distribution = np.zeros(num_simulations)
@@ -215,55 +254,161 @@ def run_monte_carlo_simulation(
         raise ValueError("No models.")
 
     # Step 3: Get defaults from config
-    threshold_default = config.get("GPD_THRESHOLD", 100000)
-    insurance_limit = config.get("UOM_INSURANCE_LIMIT", 5000000)
-    deductible = config.get("UOM_DEDUCTIBLE", 100000)
+
+    # Respect insurance toggle + stress parameters (for base/default)
+    insurance_enabled = config.get("insurance", {}).get("enabled", False)
+    freq_multiplier = config.get("frequency", {}).get("multiplier", 1.0)
+    sev_mu_shift = config.get("severity", {}).get("mu_shift", 0.0)
+    sev_scale_mult = config.get("severity", {}).get("scale_multiplier", 1.0)
+    if insurance_enabled:
+        logger.info("INSURANCE: STATE IS ENABLED")
+    else:
+        logger.info("INSURANCE: STATE IS DISABLED")
+
+    ins_config = config.get("insurance", {})
+    logger.info(
+        f"INSURANCE PARAMS: Per-Loss Limit (coverage): {ins_config.get('coverage')}, Per-Loss Deductible: {ins_config.get('deductible')}"
+    )
+
+    # Scenario UoM overrides
+    overrides = config.get("uom_overrides", {})
+    override_freq_mult = overrides.get("freq_multiplier", {})
+    override_mu_shift = overrides.get("sev_mu_shift", {})
+    override_scale_mult = overrides.get("sev_scale_multiplier", {})
 
     # Step 4: Log start
-    logger.info("Starting sim for {num_simulations:,} paths, {len(uoms)} UoMs.")
+    logger.info(f"Starting sim for {num_simulations:,} paths, {len(uoms)} UoMs.")
 
     with timed_section("monte_carlo_simulation"):
-        # Step 5: Loop over UoMs (parallelizable in future)
+        # Step 5: Loop over UoMs
         for uom in uoms:
+            # Choose stressed parameters:
+            # 1) scenario override takes priority
+            # 2) else use global stress
+            # 3) fallback is 1.0 / 0.0 / 1.0
+            uom_freq_mult = float(override_freq_mult.get(uom, freq_multiplier))
+            uom_mu_shift = float(override_mu_shift.get(uom, sev_mu_shift))
+            uom_scale_mult = float(override_scale_mult.get(uom, sev_scale_mult))
+
             model = fitted_models[uom]
             freq_params = model["freq_params"]
             sev_params = model["sev_params"]
-            threshold = sev_params.get("threshold", threshold_default)
 
-            # Step 5a: Vectorized frequency sim (Poisson for all paths)
+            # --- START STRESSED PARAMETER CALCULATION ---
+
+            # Frequency stress
+            base_lambda = freq_params["lambda"]
+            stressed_lambda = base_lambda * uom_freq_mult
+
+            # Severity stress: Create a DEEP COPY of the fitted parameters
+            # and apply the stress to the copy.
+            stressed_sev_params = sev_params.copy()
+
+            # Ensure we are working with the correct base mu/sigma
+            # using either fitted or hardcoded values
+            if not config["severity"].get("use_fitted", True):
+                mu = config["severity"]["mu"]
+                sigma = config["severity"]["sigma"]
+            else:
+                mu = stressed_sev_params["lognormal_mu"]
+                sigma = stressed_sev_params["lognormal_sigma"]
+
+            # Apply UoM-specific severity stress
+            stressed_mu = mu + uom_mu_shift
+            stressed_sigma = sigma * uom_scale_mult
+
+            # Minimum constraints
+            stressed_mu = max(stressed_mu, 8.0)
+            stressed_sigma = max(stressed_sigma, 1.0)
+
+            # Update the temporary dictionary with STRESSED parameters
+            stressed_sev_params["lognormal_mu"] = stressed_mu
+            stressed_sev_params["lognormal_sigma"] = stressed_sigma
+
+            # Step 5a: Frequency simulation
             num_losses_per_path = np.random.poisson(
-                freq_params["lambda"], size=num_simulations
+                stressed_lambda, size=num_simulations
             )
             if np.all(num_losses_per_path == 0):
-                continue  # No contrib from this UoM
+                continue
 
             # Step 5b: Compute total severity draws needed
             total_draws_needed = np.sum(num_losses_per_path)
             if total_draws_needed == 0:
                 continue
 
-            # Step 5c: Batch severity sim (from fitted hybrid model)
+            # Step 5c: Severity simulation
             batch_severities = simulate_severity(
-                total_draws_needed, sev_params, threshold=threshold
+                n_draws=total_draws_needed,
+                params=stressed_sev_params,
             )
+            batch_severities = np.maximum(batch_severities, 5_000)  # no zero losses
 
-            # Step 5d: Aggregate per-path losses (loop over paths; vectorize further if needed)
+            # Step 5d: Aggregate per-path losses
             path_losses = np.zeros(num_simulations)
             idx = 0
+            # Ensure insurance parameters are correctly used/defaulted
+            insurance_limit = config.get("insurance", {}).get(
+                "coverage", None
+            )  # Per-loss limit
+            deductible = config.get("insurance", {}).get(
+                "deductible", 0.0
+            )  # default to 0
+
+            deductible = config.get("insurance", {}).get(
+                "deductible", 0.0
+            )  # Per-loss deductible
+            coverage_pct = config.get("insurance", {}).get(
+                "coverage_pct", 1.0
+            )  # Assuming 1.0 (100%) if not specified
+            agg_limit = config.get("insurance", {}).get(
+                "agg_limit", None
+            )  # Aggregate limit
+            agg_deductible = config.get("insurance", {}).get(
+                "agg_deductible", 0.0
+            )  # Aggregate deductible
+
             for i in range(num_simulations):
                 n = num_losses_per_path[i]
                 if n > 0:
-                    path_sevs = batch_severities[idx : idx + n]  # Subset for this path
-                    # Apply per-loss mitigation (insurance limit/deductible)
-                    mitigated = apply_mitigation(
-                        path_sevs, limit=insurance_limit, deductible=deductible
-                    )
-                    path_losses[i] = np.sum(mitigated)  # Sum mitigated losses
+                    path_sevs = batch_severities[idx : idx + n]
+                    gross_loss_path = np.sum(path_sevs)
+
+                    if insurance_enabled:
+                        # 1. Apply mitigation to get insurer PAYOUTS (List[float])
+                        payouts = apply_mitigation(
+                            path_sevs.tolist(),
+                            limit=insurance_limit,
+                            deductible=deductible,
+                            coverage=coverage_pct,
+                            agg_limit=agg_limit,
+                            agg_deductible=agg_deductible,
+                        )
+                        total_payout = np.sum(payouts)
+
+                        # 2. Calculate NET LOSS for the path
+                        path_losses[i] = gross_loss_path - total_payout
+
+                    else:
+                        # If insurance is disabled, the Net Loss is the Gross Loss
+                        path_losses[i] = gross_loss_path
+
                     idx += n
-            # Step 5e: Add UoM contrib to total (under independence assumption)
+
+            # Step 5e: Add UoM contribution to total
             total_loss_distribution += path_losses
 
-    # Step 6: Log end
+    # Step 6: Debugging
+    logger.info("=== SIMULATION DEBUG ===")
+    logger.info(f"Total simulated paths: {len(total_loss_distribution):,}")
+    logger.info(f"Paths with any loss > 0: {np.sum(total_loss_distribution > 0):,}")
+    logger.info(f"Max annual loss: {total_loss_distribution.max():,.0f}")
+    logger.info(
+        f"99.9th percentile: {np.percentile(total_loss_distribution, 99.9):,.0f}"
+    )
+    logger.info(f"Mean annual loss: {total_loss_distribution.mean():,.0f}")
+
+    # Step 7: Log end
     logger.info("Simulation complete.")
     return total_loss_distribution
 
@@ -293,6 +438,21 @@ def lda_run_engine(
         fitted_models = prepare_models(config)
         # Step 2: Run simulation
         loss_distribution = run_monte_carlo_simulation(fitted_models, config)
+        # ------------------------------------------------------------------
+        # Numerical Stability Check
+        # ------------------------------------------------------------------
+
+        # Set a large, safe cap
+        MAX_LOSS_CAP = 1e15
+
+        # 1. Handle NaN values (set to 0, as NaN indicates a failed/corrupt path)
+        loss_distribution[np.isnan(loss_distribution)] = 0.0
+
+        # 2. Handle Inf values (set to the max cap)
+        loss_distribution[np.isinf(loss_distribution)] = MAX_LOSS_CAP
+
+        # 3. Clip any remaining extreme values to the max cap
+        loss_distribution = np.clip(loss_distribution, a_min=0.0, a_max=MAX_LOSS_CAP)
         # Step 3: Compute metrics
         capital_metrics = compute_capital_metrics(loss_distribution, config)
         # Step 4: Log end and return tuple
@@ -307,7 +467,7 @@ if __name__ == "__main__":
     # Step 1: Demo setup (override config for quick test)
     # Demo: Small run for validation
     cfg_obj = OpRiskConfig("config/op_config.yaml")
-    cfg_obj.update({"NUM_SIMULATIONS": 10000, "SEED": 42})
+    cfg_obj.update({"num_simulations": 10000, "SEED": 42})
     try:
         # Step 2: Run engine
         distribution, models, engine_metrics = lda_run_engine(cfg_obj.as_dict())
