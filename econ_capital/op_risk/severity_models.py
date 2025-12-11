@@ -122,7 +122,8 @@ def simulate_severity(
     tail_mask = is_tail == 1
     n_tail = np.sum(tail_mask)
     if n_tail > 0:
-        if params["gpd_xi"] == 0:
+        xi = params.get("gpd_xi", 0.0)
+        if xi == 0:
             excess = stats.expon.rvs(scale=params["gpd_beta"], size=n_tail)
         else:
             excess = stats.genpareto.rvs(
