@@ -20,7 +20,12 @@ from econ_capital.op_risk.scenarios import Scenario, ScenarioSet
 @pytest.fixture
 def config_path(tmp_path: Path) -> str:
     p = tmp_path / "config.yaml"
-    p.write_text("op_risk: {}")
+    p.write_text("""
+op_risk:
+  simulation:
+    num_simulations: 10_000
+    random_seed: 42
+""")
     return str(p)
 
 
@@ -134,3 +139,34 @@ def test_empty_note_becomes_empty_string(config_path):
     tester = OpRiskStressTester(config_path)
     result = tester.run_scenario_set(empty_set, parallel=False)[0]
     assert result.description == ""
+
+
+def test_baseline_defensive_paths_are_reachable(monkeypatch, config_path):
+    """
+    Covers the defensive return {} paths in baseline property
+    when lda_run_engine returns invalid data
+    """
+    # --- Mock lda_run_engine to return invalid data ---
+    monkeypatch.setattr(
+        "econ_capital.op_risk.stress_tests.lda_run_engine",
+        lambda config: "this is not a valid return value",
+    )
+
+    # --- Mock OpRiskConfig so it doesn't try to read real files ---
+    class FakeConfig:
+        def as_dict(self):
+            return {"simulation": {"num_simulations": 1000}}
+
+        def validate(self):
+            pass
+
+    monkeypatch.setattr(
+        "econ_capital.op_risk.stress_tests.OpRiskConfig", lambda path: FakeConfig()
+    )
+
+    # --- Now create the tester — baseline will use our mocks ---
+    tester = OpRiskStressTester(config_path)
+
+    # --- These should now trigger the defensive return {} ---
+    assert tester.baseline == {}
+    assert np.isnan(tester.baseline_capital)

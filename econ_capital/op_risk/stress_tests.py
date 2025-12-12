@@ -11,17 +11,20 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
+from copy import deepcopy
 
 import numpy as np
+import logging
 from tqdm.auto import tqdm
 
 from .scenarios import (
     Scenario,
     ScenarioSet,
-    apply_scenario_to_config,
 )
 from .lda_engine import lda_run_engine
 from .config import OpRiskConfig
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -45,11 +48,25 @@ def _run_single_scenario(
     base_config, scenario = args
     start = time.perf_counter()
 
-    stressed_config = apply_scenario_to_config(base_config, scenario)
-    result: Dict[str, Any] = lda_run_engine(stressed_config)
+    config = deepcopy(base_config)
+
+    config.setdefault("uom_overrides", {})
+    config["uom_overrides"]["freq_multiplier"] = scenario.freq_multiplier
+    config["uom_overrides"]["sev_mu_shift"] = scenario.sev_mu_shift
+    config["uom_overrides"]["sev_scale_multiplier"] = scenario.sev_scale_multiplier
+
+    result = lda_run_engine(config)
     runtime = time.perf_counter() - start
 
-    return scenario.name, result, runtime
+    # --- Normalise return: tuple or dict ---
+    if isinstance(result, dict):
+        metrics = result
+    elif isinstance(result, tuple) and len(result) >= 3:
+        metrics = result[2]
+    else:
+        raise ValueError(f"Unexpected lda_run_engine return format: {type(result)}")
+
+    return scenario.name, metrics, runtime
 
 
 class OpRiskStressTester:
@@ -59,21 +76,50 @@ class OpRiskStressTester:
 
     def __init__(self, config_path: str = "config/op_config.yaml"):
         self.config_path = Path(config_path)
-        self._baseline_result: Optional[Dict[str, Any]] = None
+        self._baseline_result: Optional[
+            Tuple[np.ndarray, Dict[str, Dict[str, Any]], Dict[str, float]]
+        ] = None
         self._base_config: Optional[Dict[str, Any]] = None
 
     @property
     def baseline(self) -> Dict[str, Any]:
+        """
+        Lazily compute and return baseline metrics dictionary.
+        Accepts lda_run_engine returning either:
+        - (dist, models, metrics) tuple  OR
+        - metrics dict directly
+        """
         if self._baseline_result is None:
             cfg = OpRiskConfig(self.config_path)
             cfg.validate()
+            # store base config without running engine
             self._base_config = cfg.as_dict()
+            # run engine and cache whatever it returns
             self._baseline_result = lda_run_engine(self._base_config)
-        return self._baseline_result
+
+        # If engine returned a 3-tuple, metrics are in index 2
+        if isinstance(self._baseline_result, tuple) and len(self._baseline_result) >= 3:
+            metrics = self._baseline_result[2]
+            if isinstance(metrics, dict):
+                return metrics
+            # defensive fallback
+            logger.error(
+                "Baseline engine tuple did not contain metrics dict: %s", type(metrics)
+            )
+            return {}
+
+        # If engine returned a dict (metrics) directly, return it
+        if isinstance(self._baseline_result, dict):
+            return self._baseline_result
+
+        # last-resort fallback
+        logger.error("Baseline result has unexpected format: %s", self._baseline_result)
+        return {}
 
     @property
     def baseline_capital(self) -> float:
-        return float(self.baseline.get("capital_999", np.nan))
+        metrics = self.baseline
+        return float(metrics.get("capital_999", np.nan))
 
     def run_scenario_set(
         self,
@@ -96,22 +142,18 @@ class OpRiskStressTester:
                 for future in tqdm(
                     as_completed(futures), total=len(futures), desc="Running scenarios"
                 ):
-                    raw_result = future.result()
-                    name: str = raw_result[0]
-                    stressed_result: Dict[str, Any] = raw_result[1]
-                    runtime: float = raw_result[2]
+                    name, metrics, runtime = future.result()
+                    cap_stressed = float(metrics.get("capital_999", np.nan))
                     scenario = next(s for s in scenarios if s.name == name)
-                    cap_stressed = float(stressed_result.get("capital_999", np.nan))
                     results.append(self._make_result(scenario, cap_stressed, runtime))
         else:
             for scenario in tqdm(scenarios, desc="Running scenarios"):
-                raw_result = _run_single_scenario((self._base_config, scenario))
-                name: str = raw_result[0]
-                stressed_result: Dict[str, Any] = raw_result[1]
-                runtime: float = raw_result[2]
-                cap_stressed = float(stressed_result.get("capital_999", np.nan))
-                results.append(self._make_result(scenario, cap_stressed, runtime))
+                name, metrics, runtime = _run_single_scenario(
+                    (self._base_config, scenario)
+                )
 
+                cap_stressed = float(metrics.get("capital_999", np.nan))
+                results.append(self._make_result(scenario, cap_stressed, runtime))
         return sorted(results, key=lambda r: r.uplift_factor, reverse=True)
 
     def _make_result(
@@ -130,7 +172,16 @@ class OpRiskStressTester:
         )
 
     def get_base_config_for_tests(self) -> dict:
-        return self._base_config.copy()
+        """
+        Return a shallow copy of the base config used for runs.
+        If not yet loaded, build the config from OpRiskConfig without running the engine
+        (useful for tests that monkeypatch lda_run_engine before baseline is called)
+        """
+        if self._base_config is None:
+            cfg = OpRiskConfig(self.config_path)
+            cfg.validate()
+            self._base_config = cfg.as_dict()
+        return dict(self._base_config)  # shallow copy
 
     def make_result_for_tests(self, scenario, cap_stressed, runtime):
         return self._make_result(scenario, cap_stressed, runtime)
