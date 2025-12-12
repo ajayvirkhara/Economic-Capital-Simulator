@@ -23,6 +23,7 @@ import logging
 import yaml
 import numpy as np
 import pandas as pd
+from copy import deepcopy
 
 from econ_capital.op_risk.data_loaders import load_frequency_data, load_severity_data
 
@@ -181,7 +182,7 @@ def build_scenario_set_from_data(
     base = build_base_profile(freq_df, sev_df, uoms=uoms)
     scenarios: List[Scenario] = []
     scenarios.append(
-        deterministic_shock(base, freq_pct=1.0, sev_pct=1.0, name="2x_uniform_shock")
+        deterministic_shock(base, freq_pct=1.0, sev_pct=1.0, name="2x Uniform Shock")
     )
     scenarios.extend(generate_multiplicative_scenarios(base, n=n_random, seed=seed))
     return ScenarioSet(base_profile=base, scenarios=scenarios)
@@ -197,17 +198,33 @@ def apply_scenario_to_config(
 ) -> Dict[str, Any]:
     """
     Convert a Scenario into a config-like dict that the LDA engine can consume.
-    It returns a shallow-modified copy of base_config with per-UoM overrides stored in 'uom_overrides'
-    so the engine or caller can interpret and apply them when fitting/simulating
+    Uses a deep copy to avoid mutating the shared base_config and stores full
+    per-UoM overrides under 'uom_overrides' so the engine can apply them per UoM.
     """
-    cfg = dict(base_config)  # shallow copy
-    cfg["uom_overrides"] = {
-        "freq_multiplier": scenario.freq_multiplier,
-        "sev_mu_shift": scenario.sev_mu_shift,
-        "sev_scale_multiplier": scenario.sev_scale_multiplier,
-    }
+    # Make a full independent copy of the config so we don't break the original
+    cfg = deepcopy(base_config)
+
+    # Ensure required sections exist
+    cfg.setdefault("uom_overrides", {})
+
+    # Store the full dictionaries
+    cfg["uom_overrides"]["freq_multiplier"] = scenario.freq_multiplier
+    cfg["uom_overrides"]["sev_mu_shift"] = scenario.sev_mu_shift
+    cfg["uom_overrides"]["sev_scale_multiplier"] = scenario.sev_scale_multiplier
+
+    # Store name
     cfg["scenario_name"] = scenario.name
-    logger.debug("Applied scenario %s to config", scenario.name)
+
+    # Safe logging — only if it's a dict
+    if isinstance(scenario.freq_multiplier, dict):
+        logger.debug(
+            "Applied scenario '%s' with per-UoM stress: %s",
+            scenario.name,
+            list(scenario.freq_multiplier),
+        )
+    else:
+        logger.debug("Applied scenario '%s' with uniform stress", scenario.name)
+
     return cfg
 
 

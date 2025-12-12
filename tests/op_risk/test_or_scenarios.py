@@ -16,6 +16,7 @@ from econ_capital.op_risk.scenarios import (
     validate_scenario_set,
     Scenario,
     ScenarioSet,
+    apply_scenario_to_config,
 )
 
 
@@ -175,7 +176,7 @@ def test_build_scenario_set_from_data_integration(
 
         assert isinstance(scenario_set, ScenarioSet)
         assert len(scenario_set.scenarios) == 3  # 1 deterministic + 2 random
-        assert any(s.name == "2x_uniform_shock" for s in scenario_set.scenarios)
+        assert any(s.name == "2x Uniform Shock" for s in scenario_set.scenarios)
         assert set(scenario_set.base_profile.keys()) == {"CYBER", "FRAUD", "LEGAL"}
 
         # Spot-check a couple of numbers we calculated manually above
@@ -204,6 +205,73 @@ def test_build_scenario_set_from_data_deterministic_only(
 
         assert len(scenario_set.scenarios) == 1
         shock = scenario_set.scenarios[0]
-        assert shock.name == "2x_uniform_shock"
         assert all(v == 2.0 for v in shock.freq_multiplier.values())
         assert all(v == 2.0 for v in shock.sev_scale_multiplier.values())
+
+
+def test_apply_scenario_to_config_preserves_full_per_uom_overrides(monkeypatch):
+    """
+    Ensures full per-UoM dictionaries are preserved (not flattened with max()).
+    """
+    base_config = {"frequency": {}, "severity": {}}
+
+    scenario = Scenario(
+        name="Test Scenario",
+        freq_multiplier={"UoM1": 2.0, "UoM2": 5.0},
+        sev_mu_shift={"UoM1": 0.1, "UoM2": 0.8},
+        sev_scale_multiplier={"UoM1": 1.1, "UoM2": 1.5},
+        note="Test",
+    )
+
+    result_config = apply_scenario_to_config(base_config, scenario)
+
+    # The full per-UoM overrides must be preserved under uom_overrides
+    assert "uom_overrides" in result_config
+    assert result_config["uom_overrides"]["freq_multiplier"] == {
+        "UoM1": 2.0,
+        "UoM2": 5.0,
+    }
+    assert result_config["uom_overrides"]["sev_mu_shift"] == {"UoM1": 0.1, "UoM2": 0.8}
+    assert result_config["uom_overrides"]["sev_scale_multiplier"] == {
+        "UoM1": 1.1,
+        "UoM2": 1.5,
+    }
+    assert result_config["scenario_name"] == "Test Scenario"
+
+    # Old flat keys should not exist
+    assert "multiplier" not in result_config.get("frequency", {})
+    assert "mu_shift" not in result_config.get("severity", {})
+
+
+def test_apply_scenario_to_config_handles_scalar_inputs_gracefully():
+    base_config = {}
+
+    # Create scenario with scalar values
+    scenario = Scenario(
+        name="Scalar Test",
+        freq_multiplier=3.0,  # scalar, not dict
+        sev_mu_shift=0.5,  # scalar
+        sev_scale_multiplier=1.2,  # scalar
+    )
+
+    result = apply_scenario_to_config(base_config, scenario)
+
+    assert result["uom_overrides"]["freq_multiplier"] == 3.0
+    assert result["uom_overrides"]["sev_mu_shift"] == 0.5
+    assert result["uom_overrides"]["sev_scale_multiplier"] == 1.2
+
+
+def test_validate_scenario_set_raises_on_uom_mismatch():
+    base_profile = {"UoM1": {"lambda": 1.0}, "UoM2": {"lambda": 2.0}}
+
+    bad_scenario = Scenario(
+        name="Bad",
+        freq_multiplier={"UoM1": 2.0},  # missing UoM2
+        sev_mu_shift={"UoM1": 0.1},
+        sev_scale_multiplier={"UoM1": 1.1},
+    )
+
+    scenario_set = ScenarioSet(base_profile=base_profile, scenarios=[bad_scenario])
+
+    with pytest.raises(ValueError, match="UoM keys mismatch"):
+        validate_scenario_set(scenario_set)
