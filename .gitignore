@@ -47,3 +47,7 @@ wheels/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# ---- Generated reports ----
+econ_capital/op_risk/reports/*.xlsx
+*.xlsx
