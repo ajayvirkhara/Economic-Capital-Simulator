@@ -223,5 +223,6 @@ class MarketRiskEconomicCapital:
             "es_10d_999": float(es_10d),
             "var_1y_999": float(var_1y),
             "es_1y_999": float(es_1y),
+            "baseline_capital": 0.0,
             "capital_breakdown": contrib.sort_values(ascending=False),
         }
