@@ -1,0 +1,12 @@
+# Normalize line endings
+* text=auto eol=lf
+
+# Force Python files to use LF
+*.py text eol=lf
+
+# Ensure YAML and config files are treated as text
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# Excel reports are binary - don't touch line endings
+*.xlsx binary
