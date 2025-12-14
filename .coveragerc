@@ -3,7 +3,10 @@ omit =
     */__main__.py
     */demo_*.py
     econ_capital/op_risk/reporting.py
+    econ_capital/op_risk/oprisk_reporting.py
     econ_capital/op_risk/run_oprisk_report.py
+    econ_capital/market_risk/marketrisk_reporting.py
+    econ_capital/market_risk/run_marketrisk_report.py
     notebooks/*
 
 [report]
