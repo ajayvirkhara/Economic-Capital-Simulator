@@ -65,7 +65,7 @@ def aggregate_credit_losses(
     """
 
     params = DEFAULT_CONFIG.copy()
-    confidence = confidence or params.get("confidence", 0.999)
+    confidence = confidence or params.get("confidence_level", 0.999)
 
     el = np.asarray(el, dtype=float)
     ul = np.asarray(ul, dtype=float)
