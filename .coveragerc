@@ -7,6 +7,8 @@ omit =
     econ_capital/op_risk/run_oprisk_report.py
     econ_capital/market_risk/marketrisk_reporting.py
     econ_capital/market_risk/run_marketrisk_report.py
+    econ_capital/credit_risk/creditrisk_reporting.py
+    econ_capital/credit_risk/run_creditrisk_report.py
     notebooks/*
 
 [report]
