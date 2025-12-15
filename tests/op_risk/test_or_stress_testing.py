@@ -20,12 +20,14 @@ from econ_capital.op_risk.scenarios import Scenario, ScenarioSet
 @pytest.fixture
 def config_path(tmp_path: Path) -> str:
     p = tmp_path / "config.yaml"
-    p.write_text("""
+    p.write_text(
+        """
 op_risk:
   simulation:
     num_simulations: 10_000
     random_seed: 42
-""")
+"""
+    )
     return str(p)
 
 
