@@ -27,6 +27,7 @@ CSV_SCHEMA = [
     "value",
     "units",
     "currency",
+    "pd_annual",
 ]
 
 
@@ -77,5 +78,6 @@ def load_dummy_credit_data() -> pd.DataFrame:
         "value": [120, 180],
         "units": ["bps", "bps"],
         "currency": ["USD", "USD"],
+        "pd_annual": ["0.01", "0.07"],
     }
     return pd.DataFrame(data)

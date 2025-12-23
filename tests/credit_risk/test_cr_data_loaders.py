@@ -23,7 +23,7 @@ from econ_capital.utils import profile_test
 def test_load_dummy_credit_data():
     df = load_dummy_credit_data()
     assert isinstance(df, pd.DataFrame)
-    assert df.shape == (2, 8)
+    assert df.shape[1] == len(CSV_SCHEMA)
     assert list(df.columns) == CSV_SCHEMA
     assert (df["units"] == "bps").all()
 
@@ -32,12 +32,13 @@ def test_load_dummy_credit_data():
 def test_load_issuer_spreads_csv_valid():
     with tempfile.NamedTemporaryFile(delete=False, suffix=".csv", mode="w") as tmp_file:
         tmp_file.write(
-            "counterparty,instrument_id,id_type,as_of_date,measure,value,units,currency\n"
-            "CPTY_X,US1111111111,ISIN,2024-12-31, cds_spread ,150, BPS ,USD\n"
+            "counterparty,instrument_id,id_type,as_of_date,measure,value,units,currency,pd_annual\n"
+            "CPTY_X,US1111111111,ISIN,2024-12-31, cds_spread ,150, BPS ,USD, 0.01\n"
         )
     df = load_issuer_spreads_csv(tmp_file.name)
     assert df.loc[0, "measure"] == "CDS_SPREAD"
     assert df.loc[0, "units"] == "bps"
+    assert df.loc[0, "pd_annual"] == pytest.approx(0.01)
     os.remove(tmp_file.name)
 
 
@@ -45,8 +46,8 @@ def test_load_issuer_spreads_csv_valid():
 def test_load_issuer_spreads_csv_invalid_units():
     with tempfile.NamedTemporaryFile(delete=False, suffix=".csv", mode="w") as tmp_file:
         tmp_file.write(
-            "counterparty,instrument_id,id_type,as_of_date,measure,value,units,currency\n"
-            "CPTY_X,US1111111111,ISIN,2024-12-31,CDS_SPREAD,150,points,USD\n"
+            "counterparty,instrument_id,id_type,as_of_date,measure,value,units,currency,pd_annual\n"
+            "CPTY_X,US1111111111,ISIN,2024-12-31,CDS_SPREAD,150,points,USD,0.01\n"
         )
     with pytest.raises(ValueError):
         load_issuer_spreads_csv(tmp_file.name)
