@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
+from econ_capital.credit_risk.allocation import allocate_ec
 from econ_capital.utils import setup_logging, validate_shape, timed_section
 from econ_capital.credit_risk.config import DEFAULT_CONFIG
 from econ_capital.credit_risk.market_model import simulate_credit_factors
@@ -89,6 +90,29 @@ def aggregate_credit_losses(
         z,
     )
     logger.info("Allocated EC per counterparty: %s", alloc)
+
+    # Simulate loss paths for Euler allocation (n_sims x n_counterparties)
+    n_sims = 10000
+    factors = simulate_credit_factors(
+        n_paths=n_sims, n_steps=len(el), corr=params["default_correlation"]
+    )
+
+    # Simple loss model: L_i = EL_i * (1 + sensitivity * factor_i)
+    sensitivity = 1.0  # or calibrate
+    simulated_losses = el[None, :] * (1 + sensitivity * factors)  # shape
+
+    # Clip negative losses
+    simulated_losses = np.maximum(simulated_losses, 0)
+
+    # Total portfolio losses per sim
+    port_losses = simulated_losses.sum(axis=1)
+
+    # Compute VaR/EC on portfolio
+    port_ec = np.quantile(port_losses, confidence)
+
+    # Euler allocation
+    alloc = allocate_ec(port_ec, simulated_losses)
+
     return el_total, ul_total, ec_total, alloc
 
 
