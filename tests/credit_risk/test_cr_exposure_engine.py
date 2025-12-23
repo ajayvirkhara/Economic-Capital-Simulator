@@ -40,9 +40,12 @@ def simulate_dummy_market(
 def test_linear_trade_mtm_increases_with_price():
     # Tests that the Mark-to-Market (MtM) for a simple linear trade increases on average when the underlying price has a positive drift (mu=0.5).
     times, market_paths = simulate_dummy_market(n_steps=252, mu=0.5)
+    n_paths = market_paths["SP500"].shape[0]  # Extract number of paths
     tr = Trade(name="IRS_like", factor="SP500", w=1.0)
     ns = NettingSet(counterparty="A", trades=[tr], csa=CSA())
-    engine = ExposureEngine(netting_set=ns, market_paths=market_paths, times=times)
+    engine = ExposureEngine(
+        netting_set=ns, market_paths=market_paths, times=times, n_paths=n_paths
+    )
     mtm = engine.compute_mtm_only()
     assert (mtm[:, -1] > mtm[:, 0]).mean() > 0.8
 
@@ -60,6 +63,7 @@ def test_gamma_trade_has_convex_mtm():
 def test_vm_and_im_effects():
     # Tests the impact of Variation Margin (VM) frequency and Initial Margin (IM) on the exposure profile's standard deviation and mean.
     times, market_paths = simulate_dummy_market(n_steps=252)
+    n_paths = market_paths["SP500"].shape[0]
     tr = Trade(name="IRS_like", factor="SP500", w=0.8)
 
     ns_daily = NettingSet(counterparty="C", trades=[tr], csa=CSA(vm_calls_per_day=1))
@@ -70,9 +74,9 @@ def test_vm_and_im_effects():
         counterparty="E", trades=[tr], csa=CSA(vm_calls_per_day=1, im=1.0)
     )
 
-    engine_d = ExposureEngine(ns_daily, market_paths, times)
-    engine_w = ExposureEngine(ns_weekly, market_paths, times)
-    engine_i = ExposureEngine(ns_im, market_paths, times)
+    engine_d = ExposureEngine(ns_daily, market_paths, times, n_paths=n_paths)
+    engine_w = ExposureEngine(ns_weekly, market_paths, times, n_paths=n_paths)
+    engine_i = ExposureEngine(ns_im, market_paths, times, n_paths=n_paths)
 
     exp_d, _ = engine_d.compute_exposure_profile()
     exp_i, _ = engine_i.compute_exposure_profile()
@@ -85,9 +89,10 @@ def test_vm_and_im_effects():
 def test_summary_dataframe_structure():
     # Tests that the output summary DataFrame contains the required columns (EAD, EAD_final) and that the Cumulative Expected Positive Exposure (EPE_cum) is monotonically non-decreasing.
     times, market_paths = simulate_dummy_market()
+    n_paths = market_paths["SP500"].shape[0]
     tr = Trade(name="IRS_like", factor="SP500", w=1.0)
     ns = NettingSet(counterparty="Z", trades=[tr], csa=CSA())
-    engine = ExposureEngine(ns, market_paths, times)
+    engine = ExposureEngine(ns, market_paths, times, n_paths=n_paths)
     _, summary = engine.compute_exposure_profile()
     assert "EAD" in summary.columns
     assert "EAD_final" in summary.columns

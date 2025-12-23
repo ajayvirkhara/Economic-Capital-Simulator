@@ -35,12 +35,14 @@ class ExposureEngine:
         netting_set: NettingSet,
         market_paths: dict[str, np.ndarray],
         times: np.ndarray,
+        n_paths: int,
         pfe_quantile: float = 0.975,
         alpha_factor: float = 1.4,
     ):
         self.netting_set = netting_set
         self.market_paths = market_paths
         self.times = np.asarray(times, dtype=float)
+        self.n_paths = n_paths
         self.pfe_quantile = pfe_quantile
         self.alpha_factor = alpha_factor
 
@@ -90,22 +92,30 @@ class ExposureEngine:
         EE = exposure.mean(axis=0)
         PFE = np.quantile(exposure, self.pfe_quantile, axis=0)
 
-        _dt = np.diff(np.concatenate([[0.0], self.times]))
-        num = np.cumsum(EE * _dt)
-        den = np.maximum(np.cumsum(_dt), 1e-12)
-        EPE_cum = num / den
+        # --- Expected Positive Exposure (EPE) ---
+        if len(EE) != len(self.times):
+            min_len = min(len(EE), len(self.times))
+            EE_aligned = EE[:min_len]
+            times_aligned = self.times[:min_len]
+        else:
+            EE_aligned = EE
+            times_aligned = self.times
 
-        # --- Apply Alpha factor to the final EPE_cum value ---
-        EAD_final = EPE_cum[-1] * self.alpha_factor
-        # Apply EAD to all time steps for consistency/tracking
-        EAD = EPE_cum * self.alpha_factor
+        EPE_cum_scalar = np.trapezoid(EE_aligned, times_aligned)
+        EPE_cum_scalar = max(EPE_cum_scalar, 0.0)
+
+        # --- Apply Alpha factor ---
+        EAD_final = EPE_cum_scalar * self.alpha_factor
+        EAD = np.full_like(EE_aligned, EPE_cum_scalar * self.alpha_factor)
+
+        # Use aligned length for summary
 
         _summary = pd.DataFrame(
             {
-                "time": self.times,
-                "EE": EE,
-                f"PFE_{int(100 * self.pfe_quantile)}": PFE,
-                "EPE_cum": EPE_cum,
+                "time": times_aligned,
+                "EE": EE_aligned,
+                f"PFE_{int(100 * self.pfe_quantile)}": PFE[: len(times_aligned)],
+                "EPE_cum": np.full_like(times_aligned, EPE_cum_scalar),
                 "EAD": EAD,
                 "EAD_final": EAD_final,
             }
