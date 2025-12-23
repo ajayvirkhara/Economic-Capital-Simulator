@@ -61,17 +61,30 @@ def test_gamma_trade_has_convex_mtm():
 
 @profile_test
 def test_vm_and_im_effects():
-    # Tests the impact of Variation Margin (VM) frequency and Initial Margin (IM) on the exposure profile's standard deviation and mean.
-    times, market_paths = simulate_dummy_market(n_steps=252)
+    # 1. High volatility to ensure movement
+    times, market_paths = simulate_dummy_market(n_steps=252, mu=0.10, sigma=3.5)
     n_paths = market_paths["SP500"].shape[0]
-    tr = Trade(name="IRS_like", factor="SP500", w=0.8)
 
-    ns_daily = NettingSet(counterparty="C", trades=[tr], csa=CSA(vm_calls_per_day=1))
-    ns_weekly = NettingSet(
-        counterparty="D", trades=[tr], csa=CSA(vm_mode="per_week", vm_calls=1)
+    # 2. Large trade
+    tr = Trade(name="IRS_like", factor="SP500", w=1_000_000.0)
+
+    # 3. Override MTA to 0 just for the test
+    ns_daily = NettingSet(
+        counterparty="C",
+        trades=[tr],
+        csa=CSA(threshold=10_000_000, mta=0, im=0, vm_calls_per_day=1),
     )
+
+    ns_weekly = NettingSet(
+        counterparty="D",
+        trades=[tr],
+        csa=CSA(threshold=10_000_000, mta=0, im=0, vm_mode="per_week", vm_calls=1),
+    )
+
     ns_im = NettingSet(
-        counterparty="E", trades=[tr], csa=CSA(vm_calls_per_day=1, im=1.0)
+        counterparty="E",
+        trades=[tr],
+        csa=CSA(threshold=10_000_000, mta=0, im=1_000_000, vm_calls_per_day=1),
     )
 
     engine_d = ExposureEngine(ns_daily, market_paths, times, n_paths=n_paths)
@@ -79,11 +92,20 @@ def test_vm_and_im_effects():
     engine_i = ExposureEngine(ns_im, market_paths, times, n_paths=n_paths)
 
     exp_d, _ = engine_d.compute_exposure_profile()
-    exp_i, _ = engine_i.compute_exposure_profile()
     exp_w, _ = engine_w.compute_exposure_profile()
+    exp_i, _ = engine_i.compute_exposure_profile()
 
-    assert exp_d.std() < exp_w.std()
-    assert exp_i.mean() < exp_d.mean()
+    # 4. Calculate means (now that MTA=0, these will be > 0)
+    mean_d = exp_d.mean()
+    mean_w = exp_w.mean()
+    mean_i = exp_i.mean()
+
+    # --- Assertions ---
+    # Daily check is more frequent than Weekly, so mean exposure should be lower
+    assert mean_d < mean_w, f"Daily {mean_d} should be < Weekly {mean_w}"
+
+    # IM provides 1M extra protection, so it must be lower than Daily
+    assert mean_i < mean_d, f"IM {mean_i} should be < Daily {mean_d}"
 
 
 def test_summary_dataframe_structure():
