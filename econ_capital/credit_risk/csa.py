@@ -43,9 +43,9 @@ class CSA:
         Used to scale daily calls (default 252).
     """
 
-    threshold: float = 0.0
-    mta: float = 0.0
-    im: float = 0.0
+    threshold: float = 10_000_000.0
+    mta: float = 5_000_000.0
+    im: float = 1_000_000.0
     vm_mode: str | None = None
     vm_calls: int | None = None
     vm_calls_per_day: int | None = None
