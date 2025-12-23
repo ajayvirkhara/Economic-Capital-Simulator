@@ -25,7 +25,7 @@ from econ_capital.credit_risk.default_model import (
 @pytest.fixture
 def data_fixture():
     """Provides a consistent time grid, exposure, and credit parameters."""
-    # 5 steps, 1-year horizon
+    # 4 steps, 1-year horizon
     times = np.array([0.25, 0.5, 0.75, 1.0])
 
     # Simple EAD profile (e.g., mean exposure)
@@ -41,7 +41,7 @@ def data_fixture():
         ]
     )
 
-    credit_params = CreditInputs(counterparty="TestCo", lgd=0.4, flat_annual_pd=0.01)
+    credit_params = CreditInputs(counterparty="TestCo", pd_annual=0.01, lgd=0.4)
 
     return times, ead_profile, pathwise_exposures, credit_params
 
@@ -82,57 +82,36 @@ def test_shape_matches_times():
 # Tests effective_lgd and the requirement of LGD/Recovery.
 def test_credit_inputs_lgd_and_recovery():
     # Test LGD provided
-    c1 = CreditInputs(counterparty="A", lgd=0.3)
+    c1 = CreditInputs(counterparty="A", pd_annual=0.01, lgd=0.3)
     assert c1.effective_lgd() == 0.3
 
     # Test Recovery provided (0.7 recovery -> 0.3 LGD)
-    c2 = CreditInputs(counterparty="B", recovery=0.7)
+    c2 = CreditInputs(counterparty="B", pd_annual=0.01, recovery=0.7)
     assert c2.effective_lgd() == pytest.approx(0.3)
 
-    # Test missing LGD/Recovery (Triggers ValueError)
-    c3 = CreditInputs(counterparty="C", lgd=None, recovery=None)
-    with pytest.raises(ValueError):
-        c3.effective_lgd()
+    # Test default LGD = 0.6 when neither provided
+    c3 = CreditInputs(counterparty="C", pd_annual=0.01)
+    assert c3.effective_lgd() == 0.6
 
-    # Test both provided
-    c4 = CreditInputs(counterparty="D", lgd=0.5, recovery=0.8)
+    # Test both provided (LGD takes precedence)
+    c4 = CreditInputs(counterparty="D", pd_annual=0.01, lgd=0.5, recovery=0.8)
     assert c4.effective_lgd() == 0.5
 
 
-# Tests the calculation of a flat hazard curve from PD.
+# Test that pd_annual is required at instantiation
+def test_credit_inputs_missing_pd_annual():
+    with pytest.raises(TypeError):
+        CreditInputs(counterparty="MissingPD")  # missing pd_annual
+
+
+# Tests the calculation of a flat hazard curve from pd_annual
 def test_credit_inputs_get_hazard_flat_pd(data_fixture):
     times, _, _, credit_params = data_fixture
 
-    # Test calculation from flat_annual_pd
     hazard_curve = credit_params.get_hazard_curve(times)
-    expected_lam = -np.log(1.0 - credit_params.flat_annual_pd)
+    expected_lam = -np.log(1.0 - credit_params.pd_annual)
     assert np.allclose(hazard_curve, expected_lam)
     assert hazard_curve.shape == times.shape
-
-
-# Tests using a pre-defined hazard curve
-def test_credit_inputs_get_hazard_predefined(data_fixture):
-    times, _, _, _ = data_fixture
-    predefined_hazard = np.array([0.01, 0.015, 0.02, 0.025])
-
-    c = CreditInputs(counterparty="H", hazard=predefined_hazard, lgd=0.5)
-
-    # Test that the predefined hazard is returned
-    returned_hazard = c.get_hazard_curve(times)
-    assert np.allclose(returned_hazard, predefined_hazard)
-
-    # Test hazard curve length mismatch (Triggers ValueError)
-    c_bad = CreditInputs(counterparty="Bad", hazard=predefined_hazard[:2], lgd=0.5)
-    with pytest.raises(ValueError):
-        c_bad.get_hazard_curve(times)
-
-
-# Tests the failure when neither hazard nor PD is provided
-def test_credit_inputs_get_hazard_missing_input():
-    times = np.array([0.5, 1.0])
-    c = CreditInputs(counterparty="M", lgd=0.5)  # Missing PD/Hazard
-    with pytest.raises(ValueError, match="Provide either hazard or flat_annual_pd"):
-        c.get_hazard_curve(times)
 
 
 # Tests the numerical correctness of incremental PD calculation
@@ -140,11 +119,6 @@ def test_incremental_default_prob_correctness():
     times = np.array([0.5, 1.0])  # dt=0.5
     hazard = np.array([0.1, 0.1])  # Hazard: flat 10% (0.1)
 
-    # t=0.5: S(0.5) = exp(-0.1 * 0.5) = exp(-0.05) ≈ 0.9512
-    # t=1.0: S(1.0) = exp(-0.1 * 1.0) = exp(-0.1) ≈ 0.9048
-
-    # ΔPD[0] = S(0) - S(0.5) = 1.0 - 0.9512 = 0.04877
-    # ΔPD[1] = S(0.5) - S(1.0) = 0.9512 - 0.9048 = 0.04649
     expected_dpd = np.array([1.0 - np.exp(-0.05), np.exp(-0.05) - np.exp(-0.10)])
 
     dpd = incremental_default_prob(times, hazard)
@@ -166,7 +140,6 @@ def test_incremental_default_prob_mismatch_shape():
 def test_ead_from_exposure_ee(data_fixture):
     _, _, pathwise_exposures, _ = data_fixture
 
-    # Mean of the columns:
     expected_ee = pathwise_exposures.mean(axis=0)
 
     ead_ee = ead_from_exposure(pathwise_exposures, method="EE")
@@ -178,7 +151,6 @@ def test_ead_from_exposure_quantile(data_fixture):
     _, _, pathwise_exposures, _ = data_fixture
     quantile_level = 0.75
 
-    # 75th percentile of the columns:
     expected_pfe = np.quantile(pathwise_exposures, quantile_level, axis=0)
 
     ead_pfe = ead_from_exposure(
@@ -204,25 +176,17 @@ def test_ead_from_exposure_validation():
 
 
 # Tests CVA computation with a flat hazard and verifies output structure
-
-
 def test_compute_cva_basic(data_fixture):
     times, ead_profile, _, credit_params = data_fixture
 
     total, profile = compute_cva(times, ead_profile, credit_params)
 
-    # CVA must be positive
     assert total > 0.0
 
-    # Total CVA is calculated as Sum(DF * EAD * LGD * dPD)
-    # Since DF (discount factor) is applied, the loss is discounted.
-    # The sum of 'Loss_bucket' must equal the total CVA
     assert np.isclose(total, profile["Loss_bucket"].sum())
 
-    # Check that Discount Factor (DF) is < 1.0 (since discounted=True)
     assert np.all(profile["DF"] < 1.0)
 
-    # Check that the output is a pandas DataFrame with expected columns
     assert isinstance(profile, pds.DataFrame)
     expected_cols = [
         "time",
@@ -243,17 +207,14 @@ def test_compute_expected_loss_basic(data_fixture):
 
     el_total, el_profile = compute_expected_loss(times, ead_profile, credit_params)
 
-    # EL must be positive
     assert el_total > 0.0
 
-    # Check that Discount Factor (DF) is 1.0 (since discounted=False)
     assert np.allclose(el_profile["DF"], 1.0)
 
 
 # Tests CVA using an explicit discount curve
 def test_compute_cva_with_explicit_discount(data_fixture):
     times, ead_profile, _, credit_params = data_fixture
-    # Explicit, non-flat discount curve
     explicit_discount = np.array([0.98, 0.95, 0.92, 0.89])
 
     total, profile = compute_cva(

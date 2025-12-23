@@ -45,17 +45,14 @@ class CreditInputs:
         Loss Given Default (fractional, e.g. 0.6 = 60%).
     recovery : float, optional
         Recovery rate (1 - LGD). Only one of LGD or recovery is required.
-    flat_annual_pd : float, optional
-        Annualized default probability (constant hazard rate).
-    hazard : np.ndarray, optional
-        Optional term-structured hazard rates per time step.
+    pd_annual : float
+        Annual probability of default (required).
     """
 
     counterparty: str
+    pd_annual: float
     lgd: Optional[float] = None
     recovery: Optional[float] = None
-    flat_annual_pd: Optional[float] = None
-    hazard: Optional[np.ndarray] = None
 
     def effective_lgd(self) -> float:
         """Return LGD, deriving from recovery if needed."""
@@ -63,27 +60,11 @@ class CreditInputs:
             return self.lgd
         if self.recovery is not None:
             return 1.0 - self.recovery
-        raise ValueError("Provide either 'lgd' or 'recovery'")
+        return 0.6  # default LGD 60%
 
     def get_hazard_curve(self, times: np.ndarray) -> np.ndarray:
-        """
-        Return a hazard rate curve consistent with the provided PD input.
-
-        If only flat_annual_pd is given, convert it to a flat hazard rate
-        λ = -ln(1 - PD).
-        """
-        times = np.asarray(times, dtype=float)
-
-        if self.hazard is not None:
-            hz = np.asarray(self.hazard, dtype=float)
-            if hz.shape[0] != times.shape[0]:
-                raise ValueError("Hazard curve length must match time grid length")
-            return hz
-
-        if self.flat_annual_pd is None:
-            raise ValueError("Provide either hazard or flat_annual_pd")
-
-        pd = np.clip(self.flat_annual_pd, 0.0, 0.999999)
+        """Convert annual PD to flat hazard rate."""
+        pd = np.clip(self.pd_annual, 0.0, 0.999999)
         lam = -np.log(1.0 - pd)
         return np.full_like(times, lam, dtype=float)
 
