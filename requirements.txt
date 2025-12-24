@@ -7,8 +7,16 @@ scipy==1.14.1
 yfinance==0.2.40
 arch==6.3.0
 pyyaml==6.0.2
+pandas-datareader==0.10.0
+
+# Reporting & Excel
+openpyxl==3.1.5
 
 # Testing & linting
 pytest==8.4.2
 black==24.8.0
 pylint==3.2.7
+pre-commit==3.8.0
+
+# Utilities
+tqdm==4.66.5
