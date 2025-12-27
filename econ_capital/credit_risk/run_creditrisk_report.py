@@ -29,32 +29,33 @@ from econ_capital.credit_risk.config import DEFAULT_CONFIG
 
 def main():
     # ------------------------------------------------------------------
-    # 1. Path Setup (Relative to this script)
+    # 1. PATH SETUP
     # ------------------------------------------------------------------
-    SCRIPT_DIR = Path(__file__).resolve().parent
-    DATA_DIR = SCRIPT_DIR / "data"
-    REPORTS_DIR = SCRIPT_DIR / "reports"
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
+    DATA_DIR = PROJECT_ROOT / "econ_capital" / "credit_risk" / "data"
+    REPORTS_DIR = PROJECT_ROOT / "econ_capital" / "credit_risk" / "reports"
 
     # Ensure directories exist
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
     print("--- Credit Risk Report Engine ---")
-    print(f"Root: {SCRIPT_DIR}")
+    print(f"Root: {PROJECT_ROOT}")
 
     # ------------------------------------------------------------------
-    # 2. Configuration Loading
+    # 2. LOAD CONFIG
     # ------------------------------------------------------------------
     config = DEFAULT_CONFIG.copy()
-    # Optional: override with a local YAML if it exists in the root
-    config_path = SCRIPT_DIR.parent.parent / "config" / "credit_config.yaml"
+    # Override with a local YAML if it exists in the root
+    config_path = PROJECT_ROOT / "config" / "credit_config.yaml"
     if config_path.exists():
         with open(config_path, "r") as f:
             yaml_conf = yaml.safe_load(f) or {}
             config.update(yaml_conf.get("credit_risk", {}))
 
     # ------------------------------------------------------------------
-    # 3. Data Loading (Looking specifically in /data/ folder)
+    # 3. LOAD DATA
     # ------------------------------------------------------------------
     csv_file = DATA_DIR / "counterparty_exposures.csv"
 
@@ -68,7 +69,7 @@ def main():
         df_positions = load_dummy_credit_data()
 
     # ------------------------------------------------------------------
-    # 4. Simulation & Risk Engine
+    # 4. SIMULATION & RISK ENGINE
     # ------------------------------------------------------------------
     unique_cptys = df_positions["counterparty"].unique()
     print(f"Simulating risks for {len(unique_cptys)} counterparties...")
@@ -134,7 +135,7 @@ def main():
     df_results = pd.DataFrame(results_list)
 
     # ------------------------------------------------------------------
-    # 5. Portfolio Aggregation (Economic Capital)
+    # 5. PORTFOLIO AGGREGATION (ECONOMIC CAPITAL)
     # ------------------------------------------------------------------
     n = len(df_results)
     corr_matrix = np.full((n, n), config.get("default_correlation", 0.2))
@@ -154,7 +155,7 @@ def main():
     df_results = df_results.sort_values("EC_Marginal", ascending=False)
 
     # ------------------------------------------------------------------
-    # 6. Report Generation
+    # 6. GENERATE REPORT
     # ------------------------------------------------------------------
     report_data = {
         "EL_total": EL_total,
@@ -171,6 +172,8 @@ def main():
     print(f"\nReport successfully generated: {output_path.name}")
     print(f"Target Directory: {REPORTS_DIR}")
     print(f"Total Portfolio EC: £{EC_total:,.2f}")
+
+    return report_data
 
 
 if __name__ == "__main__":
