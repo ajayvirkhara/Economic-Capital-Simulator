@@ -50,6 +50,7 @@ desktop.ini
 
 # ---- Generated reports ----
 econ_capital/op_risk/reports/*.xlsx
+econ_capital/reports
 *.xlsx
 
 # Credit Risk data
