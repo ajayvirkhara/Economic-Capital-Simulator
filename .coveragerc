@@ -10,6 +10,8 @@ omit =
     econ_capital/credit_risk/creditrisk_reporting.py
     econ_capital/credit_risk/run_creditrisk_report.py
     econ_capital/credit_risk/generate_portfolio.py
+    econ_capital/run_full_ec.py
+    econ_capital/firmwide_reporting.py
     notebooks/*
 
 [report]
