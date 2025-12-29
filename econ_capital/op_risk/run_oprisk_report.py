@@ -182,7 +182,12 @@ def main() -> float:
         (r.capital_stressed for r in results), default=tester.baseline_capital
     )
     total_oprisk_capital = max(scenario_capital, max_stressed)
-    return total_oprisk_capital
+    return {
+        "total_capital": total_oprisk_capital,
+        "stress_test_results": results,
+        "expert_scenario_details": config.get("expert_scenario_details", []),
+        "expert_scenario_capital": scenario_capital,
+    }
 
 
 if __name__ == "__main__":
