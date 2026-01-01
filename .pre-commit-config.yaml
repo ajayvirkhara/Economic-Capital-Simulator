@@ -13,7 +13,7 @@ repos:
       - id: pytest-check
         name: Run all tests
         entry: pytest
-        language: system
+        language: python
         pass_filenames: false
         always_run: true
         types: [python]
@@ -24,3 +24,16 @@ repos:
           - --cov-report=term-missing   # if failed show which lines are missing
           - --maxfail=1                 # stop on first failure
           - --tb=short                  # clean traceback
+        additional_dependencies:
+          - pytest
+          - pytest-cov
+          - numpy
+          - pandas
+          - scipy
+          - arch
+          - pyyaml
+          - openpyxl
+          - yfinance
+          - pandas-datareader
+          - tqdm
+          - setuptools
