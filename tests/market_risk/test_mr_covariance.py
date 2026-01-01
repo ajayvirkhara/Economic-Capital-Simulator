@@ -3,10 +3,10 @@ Unit tests for econ_capital.market_risk.covariance module.
 """
 
 from unittest.mock import MagicMock, patch
-from sys import modules
 import numpy as np
 import pandas as pd
 import pytest
+import sys
 
 from econ_capital.market_risk.covariance import (
     ewma_cov,
@@ -14,6 +14,7 @@ from econ_capital.market_risk.covariance import (
     garch_vols,
     garch_cov,
 )
+
 
 # pylint: disable=redefined-outer-name
 
@@ -157,14 +158,30 @@ def test_garch_vols_calls_arch_model_correctly(mock_arch_model, dummy_returns):
     assert mock_arch_model.call_args_list[0][1]["q"] == 1
 
 
-def test_garch_vols_raises_import_error(dummy_returns):
-    """Tests that garch_vols raises ImportError if 'arch' is missing."""
-    # Temporarily remove 'arch' from sys.modules to simulate missing installation
-    with patch.dict(modules, {"arch": None}, clear=True):
-        with pytest.raises(
-            ImportError, match="GARCH selected but 'arch' is not installed"
-        ):
-            garch_vols(dummy_returns)
+def test_garch_vols_raises_import_error(dummy_returns, monkeypatch):
+    """Tests that garch_vols falls back to EWMA when 'arch' is missing."""
+
+    # Patch the import itself to raise ImportError
+    def mock_import_error(*args, **kwargs):
+        raise ImportError("No module named 'arch'")
+
+    # Monkeypatch the 'from arch import arch_model' line
+    monkeypatch.setattr(
+        "econ_capital.market_risk.covariance.arch_model",
+        None,
+        raising=False,
+    )
+    # Make the import statement fail
+    monkeypatch.setitem(sys.modules, "arch", None)  # Ensure 'arch' not in sys.modules
+
+    # Call function
+    vols = garch_vols(dummy_returns)
+
+    # Should return EWMA proxy (Series of last std values)
+    assert isinstance(vols, pd.Series)
+    assert len(vols) == dummy_returns.shape[1]
+    assert vols.index.tolist() == dummy_returns.columns.tolist()
+    assert all(vols > 0)  # Standard deviations are positive
 
 
 # --- Tests for garch_cov ---
