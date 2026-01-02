@@ -1,13 +1,16 @@
 """
 Firm-wide Economic Capital Aggregation across Market, Credit, and Operational Risk.
+Now supports optional t-copula for fat-tailed joint loss simulation.
 """
 
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from typing import Dict, Any, Tuple, Optional
 from scipy.stats import norm
-from typing import Dict, Any, Tuple
+
+from econ_capital.market_risk.shocks import mv_t_draws
 
 
 def normalize_risk_results(
@@ -18,81 +21,116 @@ def normalize_risk_results(
     """
     Normalize the three risk outputs into a common {risk_type: {"EL": ..., "UL": ...}} format.
     """
-    # Market Risk: Use 1Y VaR 99.9% as proxy for EC
-    # Assume EL ≈ 0 for Market Risk (pure unexpected loss)
-    market_ec = market_results.get("var_1y_999", 0.0) or market_results.get(
-        "es_1y_999", 0.0
-    )
+    # Market Risk: Use 1Y ES 99.9% as UL proxy; assume EL ≈ 0
 
-    # Credit Risk: Already has EL_total and UL_total (EC = EL + z * UL)
+    # Prefer ES over VaR if available (more conservative)
+    market_ul = market_results.get("es_1y_999", market_results.get("var_1y_999", 0.0))
+    market_el = 0.0
+
+    # Credit Risk
     credit_el = credit_results.get("EL_total", 0.0)
     credit_ul = credit_results.get("UL_total", 0.0)
 
-    # OpRisk: Capital is full VaR → treat as unexpected loss (EL typically embedded or small)
-    oprisk_ec = float(oprisk_capital)
+    # OpRisk: Full capital is VaR-like → treat as UL; EL assumed embedded or zero
+    oprisk_ul = oprisk_capital
+    oprisk_el = 0.0
 
     return {
-        "Market": {"EL": 0.0, "UL": market_ec},
+        "Market": {"EL": market_el, "UL": market_ul},
         "Credit": {"EL": credit_el, "UL": credit_ul},
-        "OpRisk": {"EL": 0.0, "UL": oprisk_ec},  # Standard treatment
+        "OpRisk": {"EL": oprisk_el, "UL": oprisk_ul},
     }
 
 
 def aggregate_economic_capital(
     risk_results: Dict[str, Dict[str, float]],
-    correlations: Dict[str, Dict[str, float]] | None = None,
     confidence_level: float = 0.999,
+    copula_df: Optional[float] = None,  # If provided, use t-copula simulation
+    n_sim: int = 200_000,
+    seed: int = 42,
 ) -> Tuple[float, float, float, pd.Series, float]:
     """
-    Aggregate diversified Economic Capital using Gaussian copula approximation.
+    Aggregate risks with diversification using either:
+      - Gaussian copula (default, fast analytic)
+      - Student-t copula (fat-tailed, Monte Carlo)
 
-    Returns:
-        EL_total, UL_portfolio, EC_total, marginal_contributions, diversification_benefit
+    Returns
+    -------
+    EL_total, UL_portfolio, EC_total, marginal_contributions, diversification_benefit
     """
-    if correlations is None:
-        correlations = {
-            "Market": {"Credit": 0.3, "OpRisk": 0.1},
-            "Credit": {"Market": 0.3, "OpRisk": 0.2},
-            "OpRisk": {"Market": 0.1, "Credit": 0.2},
-        }
-
     risk_types = list(risk_results.keys())
+    n_risks = len(risk_types)  # Number of risk types (Market, Credit, OpRisk)
+
     el_vec = np.array([risk_results[rt]["EL"] for rt in risk_types])
     ul_vec = np.array([risk_results[rt]["UL"] for rt in risk_types])
 
-    EL_total = float(el_vec.sum())
+    EL_total = el_vec.sum()
 
-    # Build full correlation matrix
-    n = len(risk_types)
-    corr_matrix = np.eye(n)
-    for i, rt1 in enumerate(risk_types):
-        for j, rt2 in enumerate(risk_types):
-            if i != j:
-                corr = correlations.get(rt1, {}).get(
-                    rt2, correlations.get(rt2, {}).get(rt1, 0.0)
-                )
-                corr_matrix[i, j] = corr
-                corr_matrix[j, i] = corr
+    # Fixed correlation matrix (Market-Credit-OpRisk order)
+    corr_matrix = np.array([[1.0, 0.3, 0.1], [0.3, 1.0, 0.2], [0.1, 0.2, 1.0]])
+    # Reorder to match actual risk_types order
+    order = ["Market", "Credit", "OpRisk"]
+    idx = [order.index(rt) for rt in risk_types]
+    corr_matrix = corr_matrix[np.ix_(idx, idx)]
 
-    # Portfolio variance
-    portfolio_var = ul_vec @ corr_matrix @ ul_vec
-    UL_portfolio = np.sqrt(max(portfolio_var, 0.0))
+    if copula_df is not None and copula_df > 2:
+        # --- t-Copula Monte Carlo (fat-tailed joint simulation) ---
+        rng = np.random.default_rng(seed)
+        t_shocks = mv_t_draws(
+            n=n_sim, mu=np.zeros(n_risks), cov=corr_matrix, df=copula_df, rng=rng
+        )
+        # Scale shocks by individual ULs
+        simulated_ul = t_shocks * ul_vec[None, :]
+        total_losses = EL_total + simulated_ul.sum(axis=1)
 
-    # Total Economic Capital
-    z = norm.ppf(confidence_level)
-    EC_total = EL_total + z * UL_portfolio
+        EC_total = float(np.quantile(total_losses, confidence_level))
 
-    # Standalone (undiversified Ecomomic Capital)
-    standalone_ec = sum(
-        risk_results[rt]["EL"] + z * risk_results[rt]["UL"] for rt in risk_types
-    )
-    diversification_benefit = standalone_ec - EC_total
+        # Standalone EC using t-distribution (consistent with copula)
+        from scipy.stats import t
 
-    # Marginal contributions using Euler allocation
-    if UL_portfolio > 1e-8:
-        marginal_ul = z * (corr_matrix @ ul_vec) * ul_vec / UL_portfolio
+        t_quantile = t.ppf(confidence_level, copula_df)
+        standalone_ec = sum(
+            risk_results[rt]["EL"] + t_quantile * risk_results[rt]["UL"]
+            for rt in risk_types
+        )
+        diversification_benefit = standalone_ec - EC_total
+
+        # Marginal via simulation: average contribution in tail scenarios
+        cutoff = np.quantile(total_losses, confidence_level)
+        tail_mask = total_losses >= cutoff  # Upper tail for losses (positive capital)
+
+        tail_contrib = np.zeros(n_risks)
+        for i in range(n_risks):
+            # Individual contribution in tail: total tail loss minus others
+            indiv_tail = (
+                total_losses[tail_mask]
+                - (EL_total - el_vec[i])
+                - simulated_ul[tail_mask].sum(axis=1)
+                + simulated_ul[tail_mask, i]
+            )
+            tail_contrib[i] = indiv_tail.mean()
+
+        marginal = pd.Series(tail_contrib, index=risk_types, name="EC_Marginal")
+        UL_portfolio = np.std(simulated_ul.sum(axis=1))
+
     else:
-        marginal_ul = np.zeros(n)
-    marginal = pd.Series(marginal_ul + el_vec, index=risk_types, name="EC_Marginal")
+        # --- Gaussian Analytic Method ---
+        portfolio_var = ul_vec @ corr_matrix @ ul_vec
+        UL_portfolio = np.sqrt(max(portfolio_var, 0.0))
+
+        z = norm.ppf(confidence_level)
+        EC_total = EL_total + z * UL_portfolio
+
+        standalone_ec = sum(
+            risk_results[rt]["EL"] + z * risk_results[rt]["UL"] for rt in risk_types
+        )
+        diversification_benefit = standalone_ec - EC_total
+
+        if UL_portfolio > 1e-8:
+            marginal_ul = z * (corr_matrix @ ul_vec) * ul_vec / UL_portfolio
+        else:
+            marginal_ul = np.zeros(n_risks)
+
+        marginal = pd.Series(marginal_ul + el_vec, index=risk_types, name="EC_Marginal")
 
     return EL_total, UL_portfolio, EC_total, marginal, diversification_benefit
