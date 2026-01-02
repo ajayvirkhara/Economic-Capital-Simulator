@@ -62,25 +62,30 @@ def garch_vols(returns: pd.DataFrame) -> pd.Series:
     Notes
     -----
     - Scaling to percent for numerical stability in `arch`, then rescale back.
-    - Lazy import of `arch` to avoid hard dependency when not used.
     """
+    # Lazy import + availability check
     try:
-        from arch import arch_model  # pylint: disable=import-outside-toplevel
-    except Exception as exc:
-        raise ImportError(
-            "GARCH selected but 'arch' is not installed. Install with: pip install arch"
-        ) from exc
+        from arch import arch_model
 
+        arch_available = True
+    except ImportError:
+        arch_available = False
+
+    # Fallback if arch not available
+    if not arch_available:
+        logger.warning("arch package not available – falling back to EWMA volatility")
+        vol_proxy = returns.ewm(alpha=0.06).std().iloc[-1]  # 94% decay ≈ GARCH
+        return vol_proxy
+
+    # Normal GARCH path when arch is available
     vols: Dict[str, float] = {}
-
-    # Log GARCH volatility estimation per factor (vol level + runtime)
     t0 = time.perf_counter()
-
     for col in returns.columns:
-        # returns in %, arch expects relatively larger magnitudes
-        am = arch_model(returns[col] * 100.0, vol="Garch", p=1, q=1)
+        y = returns[col] * 100.0  # Scale to percent for arch stability
+        am = arch_model(y, vol="Garch", p=1, q=1)
         res = am.fit(disp="off")
-        vols[col] = float(res.conditional_volatility.iloc[-1].iloc[0]) / 100.0
+        # Fix: single .iloc[-1] on Series (no second .iloc[0])
+        vols[col] = res.conditional_volatility.iloc[-1].item() / 100.0
         logger.debug("Fitted GARCH for %s: vol=%.5f", col, vols[col])
 
     elapsed = time.perf_counter() - t0
@@ -91,9 +96,8 @@ def garch_vols(returns: pd.DataFrame) -> pd.Series:
 def garch_cov(returns: pd.DataFrame) -> pd.DataFrame:
     """GARCH vols x sample correlation → covariance snapshot."""
 
-    # Log GARCH covariance snapshot (correlation x volatilities + runtime)
     t0 = time.perf_counter()
-    vols = garch_vols(returns)
+    vols = garch_vols(returns)  # Self-contained: handles missing arch
     corr = returns.corr()
     cov = np.outer(vols, vols) * corr.to_numpy()
     elapsed = time.perf_counter() - t0

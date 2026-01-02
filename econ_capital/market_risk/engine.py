@@ -218,11 +218,44 @@ class MarketRiskEconomicCapital:
             elapsed,
         )
 
+        # --- Optional Stress Testing ---
+        stressed_var_1y = stressed_es_1y = None
+        stress_shocks = self.config.get("stress_shocks")
+        if stress_shocks:
+            logger.info("Applying predefined stress shocks for stress testing")
+            # Compute deterministic P&L under stress scenario
+            stress_pnl = 0.0
+            for factor_name, shock_return in stress_shocks.items():
+                if factor_name in self.positions.columns:
+                    # Sum net position in this factor
+                    net_position = self.positions[factor_name].sum()
+                    stress_pnl += net_position * shock_return
+                else:
+                    logger.warning(
+                        "Stress shock defined for unknown factor: %s", factor_name
+                    )
+
+            # Scale to 1-year (same as VaR/ES scaling)
+            stressed_pnl_1y = stress_pnl * scale
+            # Capital requirement is positive loss
+            stressed_var_1y = -stressed_pnl_1y
+            stressed_es_1y = stressed_var_1y  # Deterministic → VaR = ES
+
+            logger.info(
+                "Stress Test Result: 1Y Stressed Capital = £%.0f", stressed_var_1y
+            )
+
         return {
             "var_10d_999": float(var_10d),
             "es_10d_999": float(es_10d),
             "var_1y_999": float(var_1y),
             "es_1y_999": float(es_1y),
+            "stressed_var_1y_999": float(stressed_var_1y)
+            if stressed_var_1y is not None
+            else None,
+            "stressed_es_1y_999": float(stressed_es_1y)
+            if stressed_es_1y is not None
+            else None,
             "baseline_capital": 0.0,
             "capital_breakdown": contrib.sort_values(ascending=False),
         }

@@ -22,6 +22,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "fix_mean": True,
     "seed": 42,
     "allocation_method": "Euler-ES",
+    "stress_shocks": {
+        "SPY": -0.40,  # -40% shock
+        "TLT": 0.02,  # +200 bps parallel shift
+        "LQD": 0.005,  # +50 bps spread widening
+    },
 }
 
 # -------------------------------
