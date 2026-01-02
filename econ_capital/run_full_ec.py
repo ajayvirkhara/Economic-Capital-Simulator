@@ -69,6 +69,7 @@ def main():
         aggregate_economic_capital(
             risk_results=normalized,
             confidence_level=0.999,
+            copula_df=7.0,
         )
     )
 
