@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any
-from scipy.stats import norm
+from scipy.stats import norm, t
 
 import pandas as pd
 from openpyxl import Workbook
@@ -93,13 +93,43 @@ class FirmWideECReporter:
 
         ws.merge_cells("A2:G6")
 
+    def _apply_clean_style(self, chart, y_title):
+        chart.y_axis.title = y_title
+        chart.x_axis.delete = False
+        chart.y_axis.delete = False
+        chart.legend = None  # Remove legend
+        chart.varyColors = True  # Different colors for bars
+
+        # Clean layout
+        chart.layout = Layout(manualLayout=ManualLayout(x=0.1, y=0.1, w=0.8, h=0.75))
+
+        # Clean gridlines
+        chart.y_axis.majorGridlines = None
+        chart.y_axis.majorTickMark = "out"
+        chart.x_axis.tickLblPos = "low"
+
+        # Rotate bar labels to prevent collision
+        chart.x_axis.tickLblPos = "low"
+        chart.x_axis.textRotation = -45
+
+        # Data labels on top
+        chart.dataLabels = DataLabelList()
+        chart.dataLabels.showVal = True
+        chart.dataLabels.showCatName = False
+        chart.dataLabels.showLegendKey = False
+        chart.dataLabels.showSerName = False
+        chart.dataLabels.position = "outEnd"
+        chart.dataLabels.showLeaderLines = False
+
     def _create_summary_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Executive Summary", 1)
         ws["A1"] = "Firm-Wide Economic Capital Summary"
         ws["A1"].font = Font(size=18, bold=True, color=self.colors["header"])
 
+        copula_df = 7.0  # Match aggregate.py
+        t_quantile = t.ppf(0.999, copula_df)
         standalone_per_risk = {
-            risk: vals["EL"] + norm.ppf(0.999) * vals["UL"]
+            risk: vals["EL"] + t_quantile * vals["UL"]
             for risk, vals in self.results["individual_risks"].items()
         }
         data = [
@@ -204,13 +234,16 @@ class FirmWideECReporter:
         chart.y_axis.title = "Contribution (£)"
         chart.x_axis.title = "Risk Type"
 
-        data = Reference(ws, min_col=2, min_row=3, max_row=len(df) + 3)
-        cats = Reference(ws, min_col=1, min_row=4, max_row=len(df) + 3)
-        chart.add_data(data, titles_from_data=True)
+        # Data
+        data = Reference(ws, min_col=2, min_row=4, max_row=3 + len(df))
+        cats = Reference(ws, min_col=1, min_row=4, max_row=3 + len(df))
+        chart.add_data(data, titles_from_data=False)
+        if chart.series:
+            chart.series[0].name = ""  # Explicitly set series name to empty string
         chart.set_categories(cats)
-        chart.height = 12
-        chart.width = 20
-        ws.add_chart(chart, "D2")
+
+        self._apply_clean_style(chart, "Marginal EC (£)")
+        ws.add_chart(chart, "E2")
 
         # Table
         last_row = len(df) + 3
@@ -242,25 +275,44 @@ class FirmWideECReporter:
 
         top_n = breakdown.head(10)
         num_items = len(top_n)
-        for i, (pos, contrib) in enumerate(top_n.items(), 4):
+
+        # Define variables for row tracking
+        start_top10 = 4
+        last_row = start_top10 + num_items - 1
+
+        for i, (pos, contrib) in enumerate(top_n.items(), start_top10):
             ws.cell(i, 1, i - 3)
             ws.cell(i, 2, pos)
-            ws.cell(i, 3, f"£{contrib:,.0f}").number_format = "£#,##0"
+            cell_val = ws.cell(i, 3, float(contrib))
+            cell_val.number_format = '"£"#,##0'
+
             if i - 3 <= 3:  # Highlight top 3
                 for c in range(1, 4):
                     ws.cell(i, c).fill = PatternFill("solid", self.colors["gold"])
 
         # Waterfall chart
         chart = BarChart()
+        chart.type = "col"
+        chart.style = 10
         chart.title = "Top 10 Market Capital Impacts"
         chart.y_axis.title = "Capital (£)"
-        chart.height = 12
-        chart.width = 18
-        max_row = 3 + num_items
-        data = Reference(ws, min_col=3, min_row=3, max_row=max_row)
-        cats = Reference(ws, min_col=2, min_row=4, max_row=max_row)
+        chart.x_axis.title = "Position"
+
+        # Data and categories
+        data = Reference(ws, min_col=3, min_row=start_top10, max_row=last_row)
+        cats = Reference(ws, min_col=2, min_row=start_top10, max_row=last_row)
         chart.add_data(data, titles_from_data=True)
         chart.set_categories(cats)
+
+        # Y-axis formatting
+        max_value = top_n.max() if not top_n.empty else 0
+        chart.y_axis.number_format = '"£"#,##0'
+        chart.y_axis.scaling.min = 0  # Force min to 0 if negative values possible
+        chart.y_axis.majorUnit = (
+            1000000 if max_value > 1e7 else 100000
+        )  # Dynamic major ticks; replace max_value with actual max from data
+
+        self._apply_clean_style(chart, "Capital Contribution (£)")
         ws.add_chart(chart, "E2")
 
         # Table
@@ -279,7 +331,7 @@ class FirmWideECReporter:
         ws["A1"] = "Detailed Credit Risk Portfolio"
         ws["A1"].font = Font(size=16, bold=True, color=self.colors["header"])
 
-        # Full portfolio table (assuming 'full_data' in credit_details as pd.DataFrame)
+        # Full portfolio table
         df = self.credit_details.get("full_data", pd.DataFrame())
         if df.empty:
             ws["A3"] = "No credit risk details available."
@@ -327,7 +379,7 @@ class FirmWideECReporter:
         ws["A1"].font = Font(size=16, bold=True, color=self.colors["header"])
 
         raw_results = (
-            self.op_details.get("results", [])
+            self.op_details.get("stress_test_results", [])
             if isinstance(self.op_details, dict)
             else []
         )
@@ -482,11 +534,14 @@ class FirmWideECReporter:
 
         # Write data rows
         for i, level in enumerate(levels, 4):
-            _, _, ec, _, _ = aggregate_economic_capital(
-                self.results["individual_risks"], confidence_level=level
+            _, _, EC_total, _, _ = aggregate_economic_capital(
+                self.results["individual_risks"],
+                confidence_level=level,
+                copula_df=7.0,
             )
+
             ws.cell(i, 1, f"{level * 100:.1f}%")
-            cell_b = ws.cell(i, 2, ec)
+            cell_b = ws.cell(i, 2, EC_total)
             cell_b.number_format = '"£"#,##0'
 
         # Table
@@ -537,7 +592,7 @@ class FirmWideECReporter:
         chart.legend = None  # Legend is unnecessary since labels are on the X-axis
         chart.varyColors = True
 
-        ws.add_chart(chart, "D2")
+        ws.add_chart(chart, "E2")
 
 
 def generate_firmwide_ec_report(
