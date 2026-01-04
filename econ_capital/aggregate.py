@@ -16,29 +16,36 @@ from econ_capital.market_risk.shocks import mv_t_draws
 def normalize_risk_results(
     market_results: Dict[str, Any],
     credit_results: Dict[str, Any],
-    oprisk_capital: float,
+    oprisk_results: Dict[str, Any],
 ) -> Dict[str, Dict[str, float]]:
     """
     Normalize the three risk outputs into a common {risk_type: {"EL": ..., "UL": ...}} format.
     """
-    # Market Risk: Use 1Y ES 99.9% as UL proxy; assume EL ≈ 0
+    confidence_level = 0.999
+    z = norm.ppf(confidence_level)
 
-    # Prefer ES over VaR if available (more conservative)
-    market_ul = market_results.get("es_1y_999", market_results.get("var_1y_999", 0.0))
+    # Market: Full measure = ES_1Y_999, EL ≈ 0, UL ≈ ES / z
+    market_full = market_results.get("es_1y_999", market_results.get("var_1y_999", 0.0))
     market_el = 0.0
+    market_ul = market_full / z if z > 0 else market_full
 
     # Credit Risk
     credit_el = credit_results.get("EL_total", 0.0)
     credit_ul = credit_results.get("UL_total", 0.0)
 
     # OpRisk: Full capital is VaR-like → treat as UL; EL assumed embedded or zero
-    oprisk_ul = oprisk_capital
-    oprisk_el = 0.0
+    oprisk_full = oprisk_results.get("capital_999", 0.0)
+    oprisk_el = oprisk_results.get("expected_loss", 0.0)
+    oprisk_ul = (oprisk_full - oprisk_el) / z if z > 0 else (oprisk_full - oprisk_el)
 
     return {
-        "Market": {"EL": market_el, "UL": market_ul},
-        "Credit": {"EL": credit_el, "UL": credit_ul},
-        "OpRisk": {"EL": oprisk_el, "UL": oprisk_ul},
+        "Market": {"EL": market_el, "UL": market_ul, "Total_Standalone": market_full},
+        "Credit": {
+            "EL": credit_el,
+            "UL": credit_ul,
+            "Total_Standalone": credit_el + (credit_ul * z),
+        },
+        "OpRisk": {"EL": oprisk_el, "UL": oprisk_ul, "Total_Standalone": oprisk_full},
     }
 
 
@@ -121,9 +128,13 @@ def aggregate_economic_capital(
         z = norm.ppf(confidence_level)
         EC_total = EL_total + z * UL_portfolio
 
-        standalone_ec = sum(
-            risk_results[rt]["EL"] + z * risk_results[rt]["UL"] for rt in risk_types
-        )
+        standalone_components = []
+        for i in range(n_risks):
+            val = el_vec[i] + (ul_vec[i] * z)
+            standalone_components.append(val)
+
+        standalone_ec = sum(standalone_components)
+
         diversification_benefit = standalone_ec - EC_total
 
         if UL_portfolio > 1e-8:
