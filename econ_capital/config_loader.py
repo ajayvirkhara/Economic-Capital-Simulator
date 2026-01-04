@@ -2,7 +2,7 @@ from pathlib import Path
 import yaml
 from typing import Dict, Any
 
-PROJECT_ROOT = Path(__file__).parent.parent
+PROJECT_ROOT = Path(__file__).parent.parent.parent
 DEFAULT_YAML = PROJECT_ROOT / "default.yaml"
 
 
@@ -23,18 +23,20 @@ def merge_with_global(config: Dict[str, Any]) -> Dict[str, Any]:
     Global 'simulation' block is used as base, then overridden.
     Global 'global.seed' is promoted to top-level 'seed' for convenience.
     """
-    merged = {}
+    merged = GLOBAL_DEFAULTS.copy()
 
-    # Merge simulation section: global first, then module override
-    global_sim = GLOBAL_DEFAULTS.get("simulation", {})
-    module_sim = config.get("simulation", {})
-    merged["simulation"] = {**global_sim, **module_sim}
+    # Deep merge simulation block
+    merged_sim = merged.get("simulation", {}).copy()
+    merged_sim.update(config.get("simulation", {}))
+    merged["simulation"] = merged_sim
 
-    # Merge rest of global (e.g. global:) then full module config
-    merged = {**GLOBAL_DEFAULTS, **merged, **config}
+    # Merge other top-level keys (module overrides global)
+    for key, value in config.items():
+        if key != "simulation":
+            merged[key] = value
 
-    # Promote global seed to top level if present
+    # Promote global.seed
     if "global" in GLOBAL_DEFAULTS and "seed" in GLOBAL_DEFAULTS["global"]:
-        merged.setdefault("seed", GLOBAL_DEFAULTS["global"]["seed"])
+        merged["seed"] = GLOBAL_DEFAULTS["global"]["seed"]
 
     return merged
