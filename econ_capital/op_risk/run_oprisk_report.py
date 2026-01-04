@@ -17,6 +17,7 @@ from econ_capital.op_risk.scenarios import (
 )
 from econ_capital.op_risk.oprisk_reporting import generate_oprisk_report
 from econ_capital.op_risk.stress_tests import OpRiskStressTester
+from econ_capital.op_risk.lda_engine import lda_run_engine
 
 
 def main() -> float:
@@ -141,6 +142,7 @@ def main() -> float:
     # ──────────────────────────────────────────────────────────────
     print("\nStarting stress testing and report generation...\n")
     tester = OpRiskStressTester(config_path=str(CONFIG_PATH))
+    _ = tester.baseline  # Trigger baseline run to cache capital
 
     print("\n=== DEBUG: STRESS TEST RESULTS ===")
     try:
@@ -178,6 +180,12 @@ def main() -> float:
     print("\nREPORT SUCCESSFULLY GENERATED!")
     print(f"Location: {report_path}")
 
+    # Explicitly get full baseline metrics for firm-wide aggregation
+    base_config = tester.get_base_config_for_tests()
+    _, _, baseline_metrics = lda_run_engine(base_config)
+
+    results = tester.run_scenario_set(final_set, parallel=True)
+
     max_stressed = max(
         (r.capital_stressed for r in results), default=tester.baseline_capital
     )
@@ -187,6 +195,8 @@ def main() -> float:
         "stress_test_results": results,
         "expert_scenario_details": config.get("expert_scenario_details", []),
         "expert_scenario_capital": scenario_capital,
+        "baseline_metrics": baseline_metrics,
+        "expected_loss": baseline_metrics.get("expected_loss", 0.0),
     }
 
 
