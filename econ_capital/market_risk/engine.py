@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 
 from econ_capital.utils import setup_logging
+from econ_capital.config_loader import merge_with_global
 from .config import DEFAULT_CONFIG
 from .covariance import ewma_cov, sample_cov, garch_cov
 from .shocks import mv_t_draws
@@ -38,11 +39,26 @@ class MarketRiskEconomicCapital:
     def __post_init__(self) -> None:
         # Start profiling init to measure object setup overhead
         t0 = time.perf_counter()
+
+        # Start with DEFAULT_CONFIG (module defaults)
         cfg = DEFAULT_CONFIG.copy()
+
+        # If user passed config dict, merge it
         if self.config:
             cfg.update(self.config)
-        self.config = cfg
-        self.rng = np.random.default_rng(self.config["seed"])
+
+        # Else merge with global defaults from default.yaml
+        self.config = merge_with_global(cfg)
+
+        # Extract key simulation parameters with fallbacks
+        sim = self.config.get("simulation", {})
+        self.n_paths = sim.get("default_n_paths", 500_000)
+        self.seed = self.config.get("seed", 42)
+        self.horizon_days = sim.get("horizon_days", 10)
+        self.var_q = sim.get("var_q", 0.999)
+
+        # Create RNG using the final seed
+        self.rng = np.random.default_rng(self.seed)
 
         # Cache factor names and number of factors
         self.factor_names = list(self.risk_factors.columns)
@@ -54,8 +70,10 @@ class MarketRiskEconomicCapital:
         # Log initialization timing for reproducibility and performance tracking
         elapsed = time.perf_counter() - t0
         logger.info(
-            "Initialized MarketRiskEconomicCapital with %d factors in %.3fs",
+            "Initialized MarketRiskEconomicCapital with %d factors, %d paths, seed=%d in %.3fs",
             self.n_factors,
+            self.n_paths,
+            self.seed,
             elapsed,
         )
 
@@ -184,15 +202,15 @@ class MarketRiskEconomicCapital:
         # Reproducibility fingerprint (log seed + config snapshot)
         logger.info(
             "Starting MarketRiskEconomicCapital run with seed=%s, n_paths=%s, horizon=%s, cov_method=%s",
-            self.config.get("seed"),
-            self.config.get("n_paths"),
-            self.config.get("horizon_days"),
+            self.seed,
+            self.n_paths,
+            self.horizon_days,
             self.config.get("cov_method"),
         )
 
         # Profile entire run duration for high-level benchmarking
         t0 = time.perf_counter()
-        shocks = self._simulate_shocks(int(self.config["n_paths"]))
+        shocks = self._simulate_shocks(self.n_paths)
         pnl_port, pnl_by_pos = self._pnl_from_shocks(shocks)
 
         q = float(self.config["var_q"])
@@ -200,7 +218,7 @@ class MarketRiskEconomicCapital:
         es_10d = left_tail_es(pnl_port, q)
 
         # 10D → 1Y scaling (sqrt time)
-        scale = np.sqrt(self.config["scaling_days_year"] / self.config["horizon_days"])
+        scale = np.sqrt(self.config.get("scaling_days_year", 252) / self.horizon_days)
         var_1y = var_10d * scale
         es_1y = es_10d * scale
 
