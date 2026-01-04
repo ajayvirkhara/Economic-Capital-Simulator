@@ -29,6 +29,7 @@ from econ_capital.utils import setup_logging, validate_shape, timed_section
 from econ_capital.credit_risk.config import DEFAULT_CONFIG
 from econ_capital.credit_risk.market_model import simulate_credit_factors
 from econ_capital.credit_risk.wwr import adjust_for_wwr
+from econ_capital.config_loader import merge_with_global
 
 logger = setup_logging(__name__)
 
@@ -41,6 +42,7 @@ def aggregate_credit_losses(
     ul: np.ndarray,
     corr: np.ndarray,
     confidence: float | None = None,
+    config: dict | None = None,
 ) -> tuple[float, float, float, np.ndarray]:
     """
     Aggregate counterparty-level EL and UL into total portfolio capital.
@@ -65,7 +67,16 @@ def aggregate_credit_losses(
         Economic capital allocation per counterparty
     """
 
+    # Start with module defaults
     params = DEFAULT_CONFIG.copy()
+
+    # If caller passed config, merge it
+    if config:
+        params.update(config)
+
+    # Merge with global defaults (seed, default_n_paths, etc.)
+    params = merge_with_global(params)
+
     confidence = confidence or params.get("confidence_level", 0.999)
 
     el = np.asarray(el, dtype=float)
@@ -83,22 +94,28 @@ def aggregate_credit_losses(
         alloc = ec_total * (el / el.sum())
 
     logger.info(
-        "Portfolio Credit Capital computed | EL=%.3f | UL=%.3f | EC=%.3f | z=%.3f",
+        "Portfolio Credit Capital | EL=%.0f | UL=%.0f | EC=%.0f | Conf=%.3f%%",
         el_total,
         ul_total,
         ec_total,
-        z,
+        confidence * 100,
     )
     logger.info("Allocated EC per counterparty: %s", alloc)
 
     # Simulate loss paths for Euler allocation (n_sims x n_counterparties)
-    n_sims = 10000
+    sim_cfg = params.get("simulation", {})
+    n_sims = sim_cfg.get("default_n_paths", 10_000)
+    seed = params.get("seed", 42)
+
     factors = simulate_credit_factors(
-        n_paths=n_sims, n_steps=len(el), corr=params["default_correlation"]
+        n_paths=n_sims,
+        n_steps=len(el),
+        corr=params.get("default_correlation", 0.2),
+        seed=seed,
     )
 
     # Simple loss model: L_i = EL_i * (1 + sensitivity * factor_i)
-    sensitivity = 1.0  # or calibrate
+    sensitivity = params.get("sensitivity", 1.0)
     simulated_losses = el[None, :] * (1 + sensitivity * factors)  # shape
 
     # Clip negative losses
@@ -119,7 +136,10 @@ def aggregate_credit_losses(
 # ----------------------------------------------------------------------
 # Counterparty-level helper (for demo)
 # ----------------------------------------------------------------------
-def compute_counterparty_risk_profiles(counterparties: list[dict]) -> pd.DataFrame:
+def compute_counterparty_risk_profiles(
+    counterparties: list[dict],
+    config: dict | None = None,
+) -> pd.DataFrame:
     """
     Compute EL and UL per counterparty, simulate correlated factors,
     and apply WWR adjustment.
@@ -136,6 +156,10 @@ def compute_counterparty_risk_profiles(counterparties: list[dict]) -> pd.DataFra
     """
 
     params = DEFAULT_CONFIG.copy()
+    if config:
+        params.update(config)
+    params = merge_with_global(params)  # ← Merge global defaults
+
     df = pd.DataFrame(counterparties)
 
     # Base expected & unexpected losses
@@ -143,12 +167,16 @@ def compute_counterparty_risk_profiles(counterparties: list[dict]) -> pd.DataFra
     df["EL"] = df[EAD_col] * df["PD"] * df["LGD"]
     df["UL"] = df[EAD_col] * np.sqrt(df["PD"] * (1 - df["PD"])) * df["LGD"]
 
+    sim_cfg = params.get("simulation", {})
+    n_paths = sim_cfg.get("default_n_paths", 5000)
+    seed = params.get("seed", 42)
+
     # Simulate correlated credit factor shocks
     factors = simulate_credit_factors(
-        n_paths=params["n_paths"],
+        n_paths=n_paths,
         n_steps=len(df),
-        corr=params["corr"],
-        seed=params["seed"],
+        corr=params.get("corr", 0.2),
+        seed=seed,
     )
 
     # Map factors into loss shocks (factor ↑ → higher loss)
