@@ -18,6 +18,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+import yaml
+
 __all__ = [
     "run_full_simulation",
     "aggregate_economic_capital",
@@ -140,3 +142,9 @@ def run_full_simulation(
         print(f"\nConsolidated summary saved to: {summary_path}")
 
     return aggregated_results
+
+
+# Load global config
+GLOBAL_CONFIG = (
+    yaml.safe_load(Path("default.yaml").open()) if Path("default.yaml").exists() else {}
+)
