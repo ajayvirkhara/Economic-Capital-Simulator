@@ -47,24 +47,25 @@ def prepare_models(config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     logger.info("Starting model preparation...")
 
     try:
-        package_dir = Path(__file__).parent  # op_risk/
-        data_dir = package_dir / "data"
-        
-        freq_path = data_dir / "freq_data.csv"
-        sev_path = data_dir / "sev_data.csv"
+        # Use config paths first, fall back to package data dir if not absolute/exists
+        freq_path_str = config["frequency"]["data_path"]
+        sev_path_str = config["severity"]["data_path"]
+
+        freq_path = Path(freq_path_str)
+        sev_path = Path(sev_path_str)
+
+        # If relative or not found, resolve relative to package data dir
+        package_data_dir = Path(__file__).parent / "data"
+        if not freq_path.is_absolute():
+            freq_path = package_data_dir / freq_path.name
+        if not sev_path.is_absolute():
+            sev_path = package_data_dir / sev_path.name
 
         if not freq_path.exists() or not sev_path.exists():
             raise FileNotFoundError(f"Data files not found: {freq_path}, {sev_path}")
 
         freq_df = load_frequency_data(str(freq_path))
         sev_df = load_severity_data(str(sev_path))
-
-        print(f"Successfully loaded frequency data from: {freq_path}")
-        print(f"Frequency DataFrame shape: {freq_df.shape}")
-        print(freq_df.head())
-        print(f"Successfully loaded severity data from: {sev_path}")
-        print(f"Severity DataFrame shape: {sev_df.shape}")
-        print(sev_df.head())
 
     except Exception as e:
         print(f"DATA LOADING FAILED: {e}")
