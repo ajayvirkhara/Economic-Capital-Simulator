@@ -11,60 +11,42 @@ import numpy as np
 from econ_capital.utils import setup_logging
 from .lda_engine import run_monte_carlo_simulation
 from .data_loaders import load_frequency_data, load_severity_data
+from .lda_engine import lda_run_engine
 
 logger = setup_logging(__name__)
 
 
 def main() -> None:
-    """Run a demo simulation of operational risk economic capital."""
+    """Run a demo simulation using the full LDA engine."""
+    print("Running Operational Risk LDA Engine Demo...\n")
 
-    # --- Load data ---
-    freq_df = load_frequency_data("data/frequency_real.csv")
-    sev_df = load_severity_data("data/severity_real.csv")
+    try:
+        # Run the full engine with default config
+        loss_dist, fitted_models, metrics = lda_run_engine()
 
-    # Build models from CSV inputs
-    fitted_models = {
-        "frequency": {
-            "dist": "poisson",
-            "lambda": freq_df["lambda"].iloc[0],
-        },
-        "severity": {
-            "dist": "lognormal",
-            "mu": sev_df["mu"].iloc[0],
-            "sigma": sev_df["sigma"].iloc[0],
-        },
-    }
+        print("=== Simulation Successful ===")
+        print(f"Simulated paths: {len(loss_dist):,}")
+        print(f"Expected Loss:     £{metrics.get('expected_loss', 0):,.0f}")
+        print(f"99.9% VaR (Capital): £{metrics.get('capital_999', 0):,.0f}")
+        print(f"Mean Loss:         £{metrics.get('mean_loss', 0):,.0f}")
+        print(f"Std Dev:           £{metrics.get('std_loss', 0):,.0f}")
 
-    # --- Configure simulation ---
-    config = {
-        "n_years": 100_000,
-        "seed": 123,
-        "mitigation_factor": 0.90,
-    }
+        print("\n--- Fitted Models (first UoM) ---")
+        if fitted_models:
+            first_uom = next(iter(fitted_models))
+            print(f"{first_uom}:")
+            print(f"  Frequency: λ = {fitted_models[first_uom]['freq_params']['lambda']:.3f}")
+            print(f"  Severity:  μ = {fitted_models[first_uom]['sev_params']['lognormal_mu']:.3f}, "
+                  f"σ = {fitted_models[first_uom]['sev_params']['lognormal_sigma']:.3f}")
 
-    # --- Run LDA simulation ---
-    results = run_monte_carlo_simulation(fitted_models=fitted_models, config=config)
-    loss_dist = results["loss_distribution"]
-
-    # --- Compute capital metrics ---
-    expected_loss = loss_dist.mean()
-    var_999 = np.quantile(loss_dist, 0.999)
-    economic_capital = var_999 - expected_loss
-
-    # --- Print results ---
-    print("=== Operational Risk Economic Capital Results ===")
-    print(f"Expected Loss:        {expected_loss:,.0f}")
-    print(f"99.9% VaR:            {var_999:,.0f}")
-    print(f"Economic Capital:     {economic_capital:,.0f}\n")
-
-    print("=== Frequency Stats ===")
-    print(results["frequency_stats"])
-
-    print("\n=== Severity Stats ===")
-    print(results["severity_stats"])
+        print("\nDemo completed successfully.")
+    except Exception as e:
+        print(f"Demo failed: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 if __name__ == "__main__":
     logger.info("Running Operational Risk demo")
     main()
-    logger.info("Simulation finished successfully.")
+    logger.info("Demo finished.")
