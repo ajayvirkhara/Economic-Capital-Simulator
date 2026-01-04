@@ -38,7 +38,7 @@ def main():
     full_credit_results = run_credit_risk()  # Full dict with portfolio details
 
     print("3. Running Operational Risk module...")
-    full_oprisk_results = run_op_risk()  # Dict with total_capital + stress test details
+    full_op_results = run_op_risk()  # Dict with total_capital + stress test details
 
     # Extract scalars needed for aggregation
     market_results = {
@@ -51,13 +51,19 @@ def main():
         "UL_total": full_credit_results.get("UL_total", 0.0),
     }
 
-    oprisk_capital = full_oprisk_results["total_capital"]
+    oprisk_baseline_metrics = full_op_results.get("baseline_metrics", {})
+    oprisk_var_999 = oprisk_baseline_metrics.get("capital_999", 0.0)
+    oprisk_expected_loss = oprisk_baseline_metrics.get("expected_loss", 0.0)
+    op_results = {
+        "capital_999": oprisk_var_999,
+        "expected_loss": oprisk_expected_loss,
+    }
 
     # 2. Normalize to common format
     normalized = normalize_risk_results(
         market_results=market_results,
         credit_results=credit_results,
-        oprisk_capital=oprisk_capital,
+        oprisk_results=op_results,
     )
 
     print("\nNormalized Risk Contributions:")
@@ -101,12 +107,7 @@ def main():
         "individual_risks": normalized,
         "market_details": full_market_results,
         "credit_details": full_credit_results,
-        "op_details": {
-            "results": full_oprisk_results.get("stress_test_results", []),
-            "expert_scenario_details": full_oprisk_results.get(
-                "expert_scenario_details", []
-            ),
-        },
+        "op_details": full_op_results,
         "correlations": {
             "Market": {"Credit": 0.3, "OpRisk": 0.1},
             "Credit": {"Market": 0.3, "OpRisk": 0.2},

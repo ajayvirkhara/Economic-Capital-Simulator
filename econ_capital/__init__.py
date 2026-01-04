@@ -77,7 +77,12 @@ def run_full_simulation(
 
     if verbose:
         print("3. Running Operational Risk module...")
-    oprisk_capital = _run_op_risk()  # Must return total capital (float)
+    full_op_results = _run_op_risk()  # Must return total capital (float)
+    # Extract OpRisk components for aggregation
+    op_results = {
+        "capital_999": full_op_results.get("total_capital", 0.0),
+        "expected_loss": full_op_results.get("expected_loss", 0.0),
+    }
 
     if verbose:
         print("\nAll individual risk modules completed successfully.")
@@ -86,7 +91,7 @@ def run_full_simulation(
     normalized = normalize_risk_results(
         market_results=market_results,
         credit_results=credit_results,
-        oprisk_capital=oprisk_capital,
+        op_results=op_results,
     )
 
     if verbose:
