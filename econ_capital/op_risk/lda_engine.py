@@ -15,6 +15,8 @@ from typing import Dict, Any, Tuple
 import warnings
 import numpy as np
 import pandas as pd
+
+from econ_capital.config_loader import merge_with_global
 from .utils import setup_logging, timed_section
 from .data_loaders import load_frequency_data, load_severity_data
 from .frequency_models import fit_poisson
@@ -24,6 +26,8 @@ from .config import OpRiskConfig
 
 logger = setup_logging(__name__)
 warnings.filterwarnings("ignore", category=RuntimeWarning)
+
+PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 
 def prepare_models(config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -43,17 +47,27 @@ def prepare_models(config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     logger.info("Starting model preparation...")
 
     try:
-        if not Path(config["frequency"]["data_path"]).exists():
-            raise FileNotFoundError(
-                f"Frequency data not found at {config['frequency']['data_path']}"
-            )
-        freq_df = load_frequency_data(
-            config["frequency"]["data_path"]
-        )  # Loads historical frequency counts (e.g., # losses per period)
-        sev_df = load_severity_data(
-            config["severity"]["data_path"]
-        )  # Loads historical loss amounts
+        package_dir = Path(__file__).parent  # op_risk/
+        data_dir = package_dir / "data"
+        
+        freq_path = data_dir / "freq_data.csv"
+        sev_path = data_dir / "sev_data.csv"
+
+        if not freq_path.exists() or not sev_path.exists():
+            raise FileNotFoundError(f"Data files not found: {freq_path}, {sev_path}")
+
+        freq_df = load_frequency_data(str(freq_path))
+        sev_df = load_severity_data(str(sev_path))
+
+        print(f"Successfully loaded frequency data from: {freq_path}")
+        print(f"Frequency DataFrame shape: {freq_df.shape}")
+        print(freq_df.head())
+        print(f"Successfully loaded severity data from: {sev_path}")
+        print(f"Severity DataFrame shape: {sev_df.shape}")
+        print(sev_df.head())
+
     except Exception as e:
+        print(f"DATA LOADING FAILED: {e}")
         raise ValueError("Data loading failed.") from e
 
     # Step 2: Validate DataFrame structure (flexible for column variants)
@@ -242,10 +256,17 @@ def run_monte_carlo_simulation(
     Total loss dist array.
     """
     # Step 1: Validate and seed for reproducibility
-    num_simulations = config.get("simulation", {}).get("num_simulations", 250000)
+    # Use global default_n_paths if present, otherwise fallback to module-specific or hard default
+    sim_cfg = config.get("simulation", {})
+    num_simulations = sim_cfg.get(
+        "default_n_paths", sim_cfg.get("num_simulations", 250_000)
+    )
     if num_simulations <= 0:
         raise ValueError("num_simulations must be > 0")
-    np.random.seed(config.get("simulation", {}).get("random_seed", 42))
+
+    # Use top-level seed from merged config (from default.yaml or module override)
+    seed = config.get("seed", 42)
+    rng = np.random.default_rng(seed)  # Modern, reproducible RNG
 
     # Step 2: Initialize total loss array and extract UoMs
     total_loss_distribution = np.zeros(num_simulations)
@@ -326,9 +347,7 @@ def run_monte_carlo_simulation(
             stressed_sev_params["lognormal_sigma"] = stressed_sigma
 
             # Step 5a: Frequency simulation
-            num_losses_per_path = np.random.poisson(
-                stressed_lambda, size=num_simulations
-            )
+            num_losses_per_path = rng.poisson(stressed_lambda, size=num_simulations)
             if np.all(num_losses_per_path == 0):
                 continue
 
@@ -339,8 +358,9 @@ def run_monte_carlo_simulation(
 
             # Step 5c: Severity simulation
             batch_severities = simulate_severity(
-                n_draws=total_draws_needed,
+                n_draws=int(total_draws_needed),  # ensure int
                 params=stressed_sev_params,
+                rng=rng,
             )
             batch_severities = np.maximum(batch_severities, 5_000)  # no zero losses
 
@@ -415,6 +435,7 @@ def run_monte_carlo_simulation(
 
 def lda_run_engine(
     config: Dict[str, Any] | None = None,
+    config_path: str | None = None,
 ) -> Tuple[np.ndarray, Dict[str, Dict[str, Any]], Dict[str, float]]:
     """
     Main: Fit models, run sim, compute metrics.
@@ -427,37 +448,46 @@ def lda_run_engine(
 
     """
     # Step 0: Handle config
-    if config is None:
-        cfg = OpRiskConfig("config/op_config.yaml")
-        cfg.validate()
-        config = cfg.as_dict()
+    if config is None or isinstance(config, str) or config_path:
+        cfg_path = Path(config_path or config or "config/op_config.yaml")
+        if not cfg_path.exists():
+            raise FileNotFoundError(f"Config file not found: {cfg_path}")
+        cfg_obj = OpRiskConfig(str(cfg_path))
+        cfg_obj.validate()
+        config = cfg_obj.as_dict()
+
+    # Step 1: Merge with global defaults (seed, default_n_paths, etc.)
+    full_config = merge_with_global(config)
 
     logger.info("--- Starting LDA Engine ---")
+    logger.info(
+        f"Using {full_config.get('simulation', {}).get('default_n_paths', 100_000):,} simulations"
+    )
+    logger.info(f"Random seed: {full_config.get('seed', 'not set')}")
+
     try:
-        # Step 1: Prepare/fit models
-        fitted_models = prepare_models(config)
-        # Step 2: Run simulation
-        loss_distribution = run_monte_carlo_simulation(fitted_models, config)
-        # ------------------------------------------------------------------
-        # Numerical Stability Check
-        # ------------------------------------------------------------------
+        # Step 2: Prepare/fit models
+        fitted_models = prepare_models(full_config)
 
-        # Set a large, safe cap
-        MAX_LOSS_CAP = 1e15
+        # Step 3: Run simulation using merged config
+        loss_distribution = run_monte_carlo_simulation(fitted_models, full_config)
 
-        # 1. Handle NaN values (set to 0, as NaN indicates a failed/corrupt path)
-        loss_distribution[np.isnan(loss_distribution)] = 0.0
+        # Step 4: Numerical stability fixes
+        MAX_LOSS_CAP = 1e15  # Set a large, safe cap
+        loss_distribution = np.nan_to_num(
+            loss_distribution, nan=0.0, posinf=MAX_LOSS_CAP, neginf=0.0
+        )  # Handle Inf and NaN values
+        loss_distribution = np.clip(
+            loss_distribution, 0.0, MAX_LOSS_CAP
+        )  # Clip any remaining extreme values to the max cap
 
-        # 2. Handle Inf values (set to the max cap)
-        loss_distribution[np.isinf(loss_distribution)] = MAX_LOSS_CAP
+        # Step 5: Compute metrics
+        capital_metrics = compute_capital_metrics(loss_distribution, full_config)
 
-        # 3. Clip any remaining extreme values to the max cap
-        loss_distribution = np.clip(loss_distribution, a_min=0.0, a_max=MAX_LOSS_CAP)
-        # Step 3: Compute metrics
-        capital_metrics = compute_capital_metrics(loss_distribution, config)
-        # Step 4: Log end and return tuple
-        logger.info("Run complete: {len(loss_distribution):,} paths.")
+        # Step 6: Log end and return tuple
+        logger.info(f"Run complete: {len(loss_distribution):,} paths.")
         return loss_distribution, fitted_models, capital_metrics
+
     except Exception as e:
         logger.error("Engine failed: {e}")
         raise RuntimeError(f"LDA run aborted: {e}") from e
