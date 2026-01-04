@@ -63,7 +63,7 @@ def main():
     normalized = normalize_risk_results(
         market_results=market_results,
         credit_results=credit_results,
-        oprisk_results=op_results,
+        op_results=op_results,
     )
 
     print("\nNormalized Risk Contributions:")
