@@ -16,7 +16,7 @@ from econ_capital.market_risk.shocks import mv_t_draws
 def normalize_risk_results(
     market_results: Dict[str, Any],
     credit_results: Dict[str, Any],
-    oprisk_results: Dict[str, Any],
+    op_results: Dict[str, Any],
 ) -> Dict[str, Dict[str, float]]:
     """
     Normalize the three risk outputs into a common {risk_type: {"EL": ..., "UL": ...}} format.
@@ -34,8 +34,8 @@ def normalize_risk_results(
     credit_ul = credit_results.get("UL_total", 0.0)
 
     # OpRisk: Full capital is VaR-like → treat as UL; EL assumed embedded or zero
-    oprisk_full = oprisk_results.get("capital_999", 0.0)
-    oprisk_el = oprisk_results.get("expected_loss", 0.0)
+    oprisk_full = op_results.get("capital_999", 0.0)
+    oprisk_el = op_results.get("expected_loss", 0.0)
     oprisk_ul = (oprisk_full - oprisk_el) / z if z > 0 else (oprisk_full - oprisk_el)
 
     return {
