@@ -90,9 +90,9 @@ class TestSimulateSeverity:
         """Test simulation with valid params."""
         np.random.seed(42)
         params = fit_lognormal_gpd(sample_losses)
-        sevs = simulate_severity(1000, params)
+        sevs = simulate_severity(50000, params)
         assert isinstance(sevs, np.ndarray)
-        assert len(sevs) == 1000
+        assert len(sevs) == 50000
         assert np.all(sevs > 0)
         # Approx tail proportion (relaxed tolerance for binomial variance)
         tail_prop = np.mean(sevs >= params["threshold"])
@@ -139,7 +139,7 @@ class TestSimulateSeverity:
         params["gpd_xi"] = 0.0  # Force Exponential
         params["tail_prob"] = 0.2  # 20% tail for more tails
         np.random.seed(42)
-        sevs = simulate_severity(1000, params)
+        sevs = simulate_severity(50000, params)
         tail_sevs = sevs[sevs >= params["threshold"]]
         assert len(tail_sevs) > 0
         assert np.all(tail_sevs >= params["threshold"])
