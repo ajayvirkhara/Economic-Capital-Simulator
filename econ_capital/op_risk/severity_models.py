@@ -95,7 +95,10 @@ def fit_lognormal_gpd(
 
 
 def simulate_severity(
-    n_draws: int, params: Dict[str, Any], threshold=None
+    n_draws: int,
+    params: Dict[str, Any],
+    threshold=None,
+    rng: np.random.Generator | None = None,
 ) -> np.ndarray:
     """
     Simulate severities from fitted hybrid model.
@@ -107,10 +110,14 @@ def simulate_severity(
     Returns:
         np.ndarray: Simulated severities
     """
+
+    if rng is None:
+        rng = np.random.default_rng()  # fallback
+
     tail_prob = params.get("tail_prob", 0.05)
     threshold = params["threshold"]
 
-    is_tail = np.random.binomial(1, tail_prob, n_draws)
+    is_tail = rng.binomial(1, tail_prob, n_draws)
     sevs = np.zeros(n_draws)
 
     # ---- Body draws ----
