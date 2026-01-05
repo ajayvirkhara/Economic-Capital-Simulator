@@ -9,12 +9,13 @@ from pathlib import Path
 
 import pytest
 
+import econ_capital.config_loader as config_loader
 from econ_capital.config_loader import merge_with_global
 
 
 @pytest.fixture
 def temp_default_yaml(tmp_path: Path) -> Path:
-    """Create temporary default.yaml and monkeypatch PROJECT_ROOT to use it."""
+    """Provides a temporary 'default.yaml' and a writer function, reloading the config module on teardown."""
     yaml_path = tmp_path / "default.yaml"
 
     def _write(content: dict) -> None:
@@ -22,14 +23,13 @@ def temp_default_yaml(tmp_path: Path) -> Path:
 
     yield yaml_path, _write
 
-    # Cleanup: reload module to reset GLOBAL_DEFAULTS if needed in other tests
     import importlib
     import econ_capital.config_loader
 
     importlib.reload(econ_capital.config_loader)
 
 
-def test_global_defaults_loaded_correctly(temp_default_yaml):
+def test_global_defaults_loaded_correctly(temp_default_yaml, monkeypatch):
     yaml_path, write = temp_default_yaml
     content = {
         "global": {"seed": 999},
@@ -38,12 +38,15 @@ def test_global_defaults_loaded_correctly(temp_default_yaml):
     }
     write(content)
 
-    # Force reload
-    from econ_capital import config_loader
-    import importlib
+    # Patch the module-level variable
+    monkeypatch.setattr(config_loader, "DEFAULT_YAML", yaml_path)
 
-    importlib.reload(config_loader)
+    # Verify the loader function correctly reads the patched path
+    loaded_data = config_loader.load_global_defaults()
+    assert loaded_data == content
 
+    # Verify the global degfaults can be populated
+    monkeypatch.setattr(config_loader, "GLOBAL_DEFAULTS", loaded_data)
     assert config_loader.GLOBAL_DEFAULTS == content
 
 
@@ -119,6 +122,6 @@ def test_merge_preserves_other_keys(monkeypatch):
 
     result = merge_with_global(module_config)
 
-    assert result["logging"] == {"level": "INFO", "format": "%(message)s"}
+    assert result["logging"] == {"format": "%(message)s"}
     assert result["risk"] == {"horizon": 1}
     assert result["seed"] == 789

@@ -7,11 +7,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from scipy.stats import norm
+
 from econ_capital.aggregate import (
     normalize_risk_results,
     aggregate_economic_capital,
 )
 
+Z_999 = norm.ppf(0.999)
 
 # ===================================================================
 # Tests for normalize_risk_results
@@ -23,15 +26,21 @@ def test_normalize_risk_results_typical_case():
     credit_results = {"EL_total": 80_000_000.0, "UL_total": 200_000_000.0}
     oprisk_capital = 120_000_000.0
 
-    normalized = normalize_risk_results(market_results, credit_results, oprisk_capital)
+    op_results = {"capital_999": oprisk_capital, "expected_loss": 0.0}
+    normalized = normalize_risk_results(market_results, credit_results, op_results)
 
-    expected = {
-        "Market": {"EL": 0.0, "UL": 150_000_000.0},
-        "Credit": {"EL": 80_000_000.0, "UL": 200_000_000.0},
-        "OpRisk": {"EL": 0.0, "UL": 120_000_000.0},
-    }
+    expected_market_ul = 150_000_000.0 / Z_999
+    expected_op_ul = 120_000_000.0 / Z_999
 
-    assert normalized == expected
+    assert normalized["Credit"]["EL"] == 80_000_000.0
+    assert normalized["Credit"]["UL"] == 200_000_000.0
+
+    assert normalized["Market"]["EL"] == 0.0
+    assert np.isclose(normalized["Market"]["UL"], expected_market_ul)
+    assert normalized["Market"]["Total_Standalone"] == 150_000_000.0
+
+    assert normalized["OpRisk"]["EL"] == 0.0
+    assert np.isclose(normalized["OpRisk"]["UL"], expected_op_ul)
 
 
 def test_normalize_risk_results_fallback_to_es():
@@ -39,11 +48,15 @@ def test_normalize_risk_results_fallback_to_es():
     credit_results = {"EL_total": 50_000_000.0}
     oprisk_capital = 100_000_000.0
 
-    normalized = normalize_risk_results(market_results, credit_results, oprisk_capital)
+    op_results = {"capital_999": oprisk_capital, "expected_loss": 0.0}
+    normalized = normalize_risk_results(market_results, credit_results, op_results)
 
-    assert normalized["Market"]["UL"] == 160_000_000.0
+    expected_market_ul = 160_000_000.0 / Z_999
+    expected_op_ul = 100_000_000.0 / Z_999
+
+    assert np.isclose(normalized["Market"]["UL"], expected_market_ul)
     assert normalized["Credit"]["EL"] == 50_000_000.0
-    assert normalized["OpRisk"]["UL"] == 100_000_000.0
+    assert np.isclose(normalized["OpRisk"]["UL"], expected_op_ul)
 
 
 def test_normalize_risk_results_missing_keys():
@@ -51,14 +64,14 @@ def test_normalize_risk_results_missing_keys():
     credit_results = {}
     oprisk_capital = 0.0
 
-    normalized = normalize_risk_results(market_results, credit_results, oprisk_capital)
+    op_results = {"capital_999": oprisk_capital, "expected_loss": 0.0}
+    normalized = normalize_risk_results(market_results, credit_results, op_results)
 
     expected = {
-        "Market": {"EL": 0.0, "UL": 0.0},
-        "Credit": {"EL": 0.0, "UL": 0.0},
-        "OpRisk": {"EL": 0.0, "UL": 0.0},
+        "Market": {"EL": 0.0, "UL": 0.0, "Total_Standalone": 0.0},
+        "Credit": {"EL": 0.0, "UL": 0.0, "Total_Standalone": 0.0},
+        "OpRisk": {"EL": 0.0, "UL": 0.0, "Total_Standalone": 0.0},
     }
-
     assert normalized == expected
 
 
@@ -135,9 +148,9 @@ def test_aggregate_economic_capital_custom_confidence_level(standard_normalized)
 def test_t_copula_produces_fatter_tails_than_gaussian():
     """
     Test that enabling t-copula (with low df) produces:
-    - Higher total EC than Gaussian (due to fat tails)
-    - Activation of the t-copula code path
-    - Reasonable diversification benefit
+        - Higher total EC than Gaussian (due to fat tails)
+        - Activation of the t-copula code path
+        - Reasonable diversification benefit
     """
     # Simple normalized risk inputs (all EL=0 for clarity)
     normalized = {

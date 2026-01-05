@@ -37,7 +37,7 @@ def test_run_full_simulation_happy_path(fixed_time):
     """Test full orchestration with realistic values and verify output + JSON save."""
     market_results = {"var_1y_999": 150_000_000.0}
     credit_results = {"EL_total": 80_000_000.0, "UL_total": 200_000_000.0}
-    oprisk_capital = 120_000_000.0
+    op_results = {"total_capital": 120_000_000.0, "expected_loss": 0.0}
 
     normalized = {
         "Market": {"EL": 0.0, "UL": 150_000_000.0},
@@ -65,9 +65,7 @@ def test_run_full_simulation_happy_path(fixed_time):
             "econ_capital.credit_risk.run_creditrisk_report.main",
             return_value=credit_results,
         ),
-        patch(
-            "econ_capital.op_risk.run_oprisk_report.main", return_value=oprisk_capital
-        ),
+        patch("econ_capital.op_risk.run_oprisk_report.main", return_value=op_results),
         patch("econ_capital.normalize_risk_results", return_value=normalized),
         patch(
             "econ_capital.aggregate_economic_capital",
@@ -104,7 +102,7 @@ def test_run_full_simulation_handles_zero_values(fixed_time):
     with (
         patch("econ_capital.market_risk.run_marketrisk_report.main", return_value={}),
         patch("econ_capital.credit_risk.run_creditrisk_report.main", return_value={}),
-        patch("econ_capital.op_risk.run_oprisk_report.main", return_value=0.0),
+        patch("econ_capital.op_risk.run_oprisk_report.main", return_value={}),
     ):
         result = run_full_simulation(verbose=False)
 
@@ -125,7 +123,10 @@ def test_run_full_simulation_verbose_prints(fixed_time, capsys):
             "econ_capital.credit_risk.run_creditrisk_report.main",
             return_value={"EL_total": 5e7, "UL_total": 2e8},
         ),
-        patch("econ_capital.op_risk.run_oprisk_report.main", return_value=1e8),
+        patch(
+            "econ_capital.op_risk.run_oprisk_report.main",
+            return_value={"total_capital": 1e8},
+        ),
     ):
         run_full_simulation(verbose=True)
 
@@ -156,7 +157,10 @@ def test_run_full_simulation_respects_config_override(fixed_time):
             "econ_capital.credit_risk.run_creditrisk_report.main",
             return_value={"EL_total": 10.0, "UL_total": 50.0},
         ),
-        patch("econ_capital.op_risk.run_oprisk_report.main", return_value=20.0),
+        patch(
+            "econ_capital.op_risk.run_oprisk_report.main",
+            return_value={"total_capital": 20.0},
+        ),
     ):
         result = run_full_simulation(config_override=config, verbose=False)
 
