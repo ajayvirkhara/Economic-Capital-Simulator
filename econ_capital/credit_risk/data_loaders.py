@@ -59,9 +59,24 @@ def load_issuer_spreads_csv(path: str) -> pd.DataFrame:
     if missing:
         raise ValueError(f"CSV missing required columns: {missing}")
     df["measure"] = df["measure"].str.upper().str.strip()
-    df["units"] = df["units"].str.lower().str.strip()
-    if not set(df["units"]).issubset({"bps", "%", "per_year"}):
-        raise ValueError("units must be bps, %, or per_year")
+    df["units"] = df["units"].astype(str).str.lower().str.strip()
+    allowed_units = {"bps", "%", "per_year", "", "absolute"}
+    if not set(df["units"]).issubset(allowed_units):
+        raise ValueError(
+            "units must be bps, %, per_year, or blank (for absolute values)"
+        )
+
+    def convert_value(row):
+        if row["units"] == "bps":
+            return row["value"] / 10000  # Convert bps to decimal (e.g., 120 -> 0.012)
+        elif row["units"] == "%":
+            return row["value"] / 100  # Convert % to decimal (e.g., 1.2 -> 0.012)
+        elif row["units"] == "per_year":
+            return row["value"]  # Assume already in decimal annual form
+        else:  # Blank or "absolute"
+            return row["value"]  # No conversion
+
+    df["value"] = df.apply(convert_value, axis=1)
     if (df["value"] < 0).any():
         raise ValueError("Negative values found")
     return df
