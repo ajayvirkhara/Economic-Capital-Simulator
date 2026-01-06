@@ -91,13 +91,13 @@ def main():
         print(f"   {risk:8} : £{contrib:>15,.0f}")
 
     # 4. Build enriched summary with detailed data
-    run_timestamp = datetime.now().isoformat()
+    readable_time = datetime.now().strftime("%d %B %Y, %H:%M:%S")
 
     output_dir = Path("econ_capital/reports")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     summary = {
-        "run_timestamp": run_timestamp,
+        "run_timestamp": readable_time,
         "run_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "EL_total": EL_total,
         "UL_portfolio": UL_portfolio,

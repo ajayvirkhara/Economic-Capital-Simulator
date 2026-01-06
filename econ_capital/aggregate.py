@@ -24,8 +24,29 @@ def normalize_risk_results(
     confidence_level = 0.999
     z = norm.ppf(confidence_level)
 
+    # Validate all required keys
+    required_market = ["es_1y_999"]  # VaR optional
+    for key in required_market:
+        if key not in market_results:
+            raise KeyError(f"Missing {key} in market_results")
+
+    required_credit = ["EL_total", "UL_total"]
+    for key in required_credit:
+        if key not in credit_results:
+            raise KeyError(f"Missing {key} in credit_results")
+
+    required_op = ["capital_999", "expected_loss"]
+    for key in required_op:
+        if key not in op_results:
+            raise KeyError(f"Missing {key} in op_results")
+
+    if z <= 0:
+        raise ValueError("z must be positive for UL calculations")
+
     # Market: Full measure = ES_1Y_999, EL ≈ 0, UL ≈ ES / z
-    market_full = market_results.get("es_1y_999", market_results.get("var_1y_999", 0.0))
+    market_full = market_results.get(
+        "es_1y_999", market_results.get("var_1y_999", 0.0)
+    )  # default to ES (conservative)
     market_el = 0.0
     market_ul = market_full / z if z > 0 else market_full
 
@@ -142,6 +163,7 @@ def aggregate_economic_capital(
         else:
             marginal_ul = np.zeros(n_risks)
 
-        marginal = pd.Series(marginal_ul + el_vec, index=risk_types, name="EC_Marginal")
+        marginal = pd.Series(marginal_ul, index=risk_types, name="EC_Marginal")
+        marginal["Credit"] += el_vec[1]  # or identify by index/name
 
     return EL_total, UL_portfolio, EC_total, marginal, diversification_benefit
