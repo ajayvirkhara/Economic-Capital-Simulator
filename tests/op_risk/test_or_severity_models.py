@@ -9,7 +9,6 @@ import pytest
 from econ_capital.op_risk.severity_models import fit_lognormal_gpd, simulate_severity
 
 
-# pylint: disable=redefined-outer-name
 @pytest.fixture
 def sample_losses():
     """Fixture: Generate seeded lognormal losses for consistent testing."""

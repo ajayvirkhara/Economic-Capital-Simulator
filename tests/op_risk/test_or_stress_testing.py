@@ -11,8 +11,6 @@ from econ_capital.op_risk.stress_tests import (
 )
 from econ_capital.op_risk.scenarios import Scenario, ScenarioSet
 
-# pylint: disable=redefined-outer-name
-
 
 # ------------------------------------------------------------------
 # Fixtures

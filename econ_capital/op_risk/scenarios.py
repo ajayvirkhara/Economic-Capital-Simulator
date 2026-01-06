@@ -123,7 +123,6 @@ def deterministic_shock(
     )
 
 
-# pylint: disable=too-many-positional-arguments
 def generate_multiplicative_scenarios(
     base_profile: Dict[str, Dict[str, float]],
     n: int = 10,

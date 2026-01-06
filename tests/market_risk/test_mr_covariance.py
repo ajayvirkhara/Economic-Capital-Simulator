@@ -16,8 +16,6 @@ from econ_capital.market_risk.covariance import (
 )
 
 
-# pylint: disable=redefined-outer-name
-
 # --- Fixtures and Constants ---
 
 

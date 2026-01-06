@@ -2,8 +2,6 @@ import pytest
 
 from econ_capital.op_risk.insurance import apply_mitigation
 
-# pylint: disable=redefined-outer-name
-
 
 # -------------------------------------------------------------
 # Fixtures

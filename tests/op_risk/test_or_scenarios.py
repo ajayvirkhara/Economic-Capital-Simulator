@@ -23,7 +23,6 @@ from econ_capital.op_risk.scenarios import (
 # =============================================================================
 # Fixtures – small, realistic datasets used by almost every test
 # =============================================================================
-# pylint: disable=redefined-outer-name
 
 
 @pytest.fixture

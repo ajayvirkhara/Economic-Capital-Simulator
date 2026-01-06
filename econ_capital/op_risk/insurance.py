@@ -7,8 +7,6 @@ from __future__ import annotations
 from typing import List, Optional
 import numpy as np
 
-# pylint: disable=too-many-positional-arguments
-
 
 def apply_mitigation(
     losses: List[float],

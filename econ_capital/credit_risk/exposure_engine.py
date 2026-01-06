@@ -29,7 +29,6 @@ logger = setup_logging(__name__)
 class ExposureEngine:
     """Computes MTM, collateral, and exposure metrics for a given netting set."""
 
-    # pylint: disable=too-many-positional-arguments
     def __init__(
         self,
         netting_set: NettingSet,

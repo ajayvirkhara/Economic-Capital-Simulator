@@ -16,8 +16,6 @@ from econ_capital.credit_risk.default_model import (
     compute_expected_loss,
 )
 
-# pylint: disable=redefined-outer-name
-
 # --- Fixtures and Setup ---
 
 

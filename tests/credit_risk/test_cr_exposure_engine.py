@@ -14,7 +14,6 @@ from econ_capital.credit_risk import (
 from econ_capital.utils import profile_test
 
 
-# pylint: disable=too-many-positional-arguments
 def simulate_dummy_market(
     n_paths=5000,
     n_steps=6,

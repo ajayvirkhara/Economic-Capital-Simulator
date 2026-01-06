@@ -23,7 +23,6 @@ from econ_capital.credit_risk.wwr import adjust_for_wwr
 # ----------------------------------------------------------------------
 # Simulate simple SP500 price paths (for exposure demonstration)
 # ----------------------------------------------------------------------
-# pylint: disable=too-many-positional-arguments
 def _simulate_sp500_paths(
     n_paths: int,
     times: np.ndarray,
