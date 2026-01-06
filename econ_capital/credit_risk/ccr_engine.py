@@ -182,7 +182,7 @@ def compute_counterparty_risk_profiles(
     # Map factors into loss shocks (factor ↑ → higher loss)
     base_losses = df["EL"].values[None, :]
     shocked_losses = base_losses * (
-        1 + 0.1 * factors
+        1 + 0.5 * factors
     )  # 10% sensitivity to factor movement
     simulated_mean_losses = shocked_losses.mean(axis=0)
 

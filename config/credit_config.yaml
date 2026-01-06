@@ -31,7 +31,7 @@ credit_risk:
     shock_scale: 0.10
 
   positions_csv: "econ_capital/credit_risk/data/counterparty_exposures.csv"
-  csa_threshold: 10000000
-  csa_mta: 5000000
+  csa_threshold: 1000000
+  csa_mta: 500000
 
-  horizon_steps: 10
+  horizon_steps: 51
