@@ -12,6 +12,7 @@ from pathlib import Path
 import yaml
 import numpy as np
 import pandas as pd
+from scipy.stats import norm
 
 # Internal package imports
 from econ_capital.credit_risk.data_loaders import (
@@ -21,8 +22,6 @@ from econ_capital.credit_risk.data_loaders import (
 from econ_capital.credit_risk.trade_models import Trade, NettingSet
 from econ_capital.credit_risk.csa import CSA
 from econ_capital.credit_risk.exposure_engine import ExposureEngine
-from econ_capital.credit_risk.default_model import CreditInputs, compute_expected_loss
-from econ_capital.credit_risk.ccr_engine import aggregate_credit_losses
 from econ_capital.credit_risk.creditrisk_reporting import generate_creditrisk_report
 from econ_capital.credit_risk.config import DEFAULT_CONFIG
 
@@ -75,14 +74,30 @@ def main():
     print(f"Simulating risks for {len(unique_cptys)} counterparties...")
 
     # Shared market paths for systematic exposure (Stylized GBM)
-    n_paths = config.get("n_paths", 2000)
-    times = np.linspace(0, 1.0, config.get("horizon_steps", 6))
+    n_paths = config.get("n_paths", 10000)
+    times = np.linspace(0, 5, config.get("horizon_steps", 51))
     rng = np.random.default_rng(config.get("seed", 42))
 
-    # Simulate a single factor (SP500) that drives exposures
-    prices = 100 * np.exp(
-        np.cumsum(rng.normal(0.01, 0.1, size=(n_paths, len(times))), axis=1)
+    # Simulate SP500 paths with positive drift and high volatility
+    mu_annual = 0.08  # 8% expected annual return
+    sigma_annual = 0.20  # 20% annual volatility
+
+    # Time steps: 50 intervals over 10 years
+    dt = np.diff(times)  # shape (50,)
+    dt = dt[np.newaxis, :]  # shape (1, 50) for broadcasting
+
+    Z = rng.standard_normal((n_paths, len(times) - 1))
+
+    log_returns = (mu_annual - 0.5 * sigma_annual**2) * dt + sigma_annual * np.sqrt(
+        dt
+    ) * Z
+
+    log_prices = np.cumsum(
+        np.concatenate([np.zeros((n_paths, 1)), log_returns], axis=1), axis=1
     )
+
+    prices = 100.0 * np.exp(log_prices)  # Start at S0 = 100
+
     market_paths = {"SP500": prices}
 
     results_list = []
@@ -95,21 +110,26 @@ def main():
         pd_val = cpty_data["pd_annual"].mean()
 
         # Build Netting Set
-        trades = [Trade(name=f"{cpty}_Exposure", factor="SP500", w=total_ead_input)]
-        ns = NettingSet(counterparty=cpty, trades=trades, csa=CSA(threshold=1_000_000))
+        trades = [
+            Trade(
+                name=f"{cpty}_Exposure",
+                factor="SP500",
+                w=total_ead_input * 1.0,  # linear exposure
+                gamma=0.01,  # positive convexity
+            )
+        ]
+        ns = NettingSet(counterparty=cpty, trades=trades, csa=CSA(threshold=5_000_000))
 
         # Run Exposure Engine
         engine = ExposureEngine(ns, market_paths, times, n_paths)
         _, summary = engine.compute_exposure_profile()
         ead_final = summary["EAD_final"].iloc[0]
 
-        # Compute Expected Loss (EL)
-        credit_input = CreditInputs(counterparty=cpty, pd_annual=pd_val, lgd=0.45)
-        el, _ = compute_expected_loss(
-            times, np.full_like(times, ead_final), credit_input
-        )
+        # Compute Expected Loss (EL) - Basel Standard
+        ead_final_scalar = summary["EAD_final"].iloc[0]
+        el = ead_final_scalar * pd_val * 0.45
 
-        # Compute Unexpected Loss (UL) approximation
+        # Compute Bernoulli Unexpected Loss (UL)
         # UL = EAD * LGD * sqrt(PD * (1-PD))
         ul = ead_final * 0.45 * np.sqrt(pd_val * (1 - pd_val))
 
@@ -141,15 +161,23 @@ def main():
     corr_matrix = np.full((n, n), config.get("default_correlation", 0.2))
     np.fill_diagonal(corr_matrix, 1.0)
 
-    EL_total, UL_total, EC_total, alloc_fractions = aggregate_credit_losses(
-        df_results["EL"].values,
-        df_results["UL"].values,
-        corr_matrix,
-        confidence=config.get("confidence_level", 0.999),
-    )
+    # Portfolio Unexpected Loss (diversified)
+    ul_vec = df_results["UL"].values
+    portfolio_var = ul_vec @ corr_matrix @ ul_vec
+    UL_total = np.sqrt(max(portfolio_var, 0.0))
 
-    # Map allocations (£) back to the dataframe
-    df_results["EC_Marginal"] = alloc_fractions * EC_total
+    # Portfolio totals
+    EL_total = df_results["EL"].sum()
+    z = norm.ppf(config.get("confidence_level", 0.999))
+    EC_total = EL_total + z * UL_total
+
+    # Marginal EC: Euler allocation on UL part + pro-rata EL
+    if UL_total > 1e-8:
+        marginal_ul = z * (corr_matrix @ ul_vec) * ul_vec / UL_total
+    else:
+        marginal_ul = np.zeros(n)
+
+    df_results["EC_Marginal"] = marginal_ul + df_results["EL"].values
 
     # Sort by Capital impact for the report
     df_results = df_results.sort_values("EC_Marginal", ascending=False)

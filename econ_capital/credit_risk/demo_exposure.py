@@ -67,7 +67,9 @@ def main():
 
     # Create netting set and engine
     ns = NettingSet(counterparty="CPTY_A", trades=trades, csa=csa)
-    engine = ExposureEngine(netting_set=ns, market_paths=market_paths, times=times)
+    engine = ExposureEngine(
+        netting_set=ns, market_paths=market_paths, times=times, n_paths=n_paths
+    )
 
     with timed_section("compute_exposure_profile"):
         _, summary = engine.compute_exposure_profile()
