@@ -14,6 +14,9 @@ from econ_capital.market_risk.data_loaders import (
 )
 from econ_capital.market_risk.engine import MarketRiskEconomicCapital
 from econ_capital.market_risk.marketrisk_reporting import generate_market_risk_report
+from econ_capital.utils import setup_logging
+
+logger = setup_logging(__name__)
 
 
 def main() -> dict:
@@ -86,7 +89,7 @@ def main() -> dict:
         print("Failed during simulation:", e)
         raise
 
-    print("=== END DEBUG ===\n")
+    logger.debug("=== END DEBUG ===")
 
     # ──────────────────────────────────────────────────────────────
     # GENERATE FINAL REPORT

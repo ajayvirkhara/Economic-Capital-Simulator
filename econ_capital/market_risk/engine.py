@@ -239,7 +239,13 @@ class MarketRiskEconomicCapital:
         # --- Optional Stress Testing ---
         stressed_var_1y = stressed_es_1y = None
         stress_shocks = self.config.get("stress_shocks")
-        if stress_shocks:
+        stress_enabled = self.config.get("stress_enabled")
+        if not isinstance(stress_shocks, dict) or not stress_shocks:
+            logger.warning(
+                "Stress testing enabled but no valid shocks defined; skipping."
+            )
+            stressed_var_1y = stressed_es_1y = 0.0
+        if stress_enabled:
             logger.info("Applying predefined stress shocks for stress testing")
             # Compute deterministic P&L under stress scenario
             stress_pnl = 0.0
@@ -256,7 +262,7 @@ class MarketRiskEconomicCapital:
             # Scale to 1-year (same as VaR/ES scaling)
             stressed_pnl_1y = stress_pnl * scale
             # Capital requirement is positive loss
-            stressed_var_1y = -stressed_pnl_1y
+            stressed_var_1y = max(0.0, -stressed_pnl_1y)
             stressed_es_1y = stressed_var_1y  # Deterministic → VaR = ES
 
             logger.info(

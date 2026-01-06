@@ -27,6 +27,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "TLT": 0.02,  # +200 bps parallel shift
         "LQD": 0.005,  # +50 bps spread widening
     },
+    "stress_enabled": True,
 }
 
 # -------------------------------
