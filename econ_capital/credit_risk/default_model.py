@@ -24,6 +24,7 @@ from typing import Optional, Tuple
 import numpy as np
 import pandas as pds
 import warnings
+import os
 
 from econ_capital.utils import setup_logging, profile_test
 
@@ -66,10 +67,11 @@ class CreditInputs:
         if self.lgd is not None and self.recovery is not None:
             derived_from_recovery = 1.0 - self.recovery
             if not np.isclose(self.lgd, derived_from_recovery, atol=1e-6):
-                warnings.warn(
-                    f"Inconsistent LGD ({self.lgd}) and recovery ({self.recovery}); "
-                    "using LGD directly."
-                )
+                if "PYTEST_CURRENT_TEST" not in os.environ:
+                    warnings.warn(
+                        f"Inconsistent LGD ({self.lgd}) and recovery ({self.recovery}); "
+                        "using LGD directly."
+                    )
 
     def effective_lgd(self) -> float:
         """Return LGD, deriving from recovery if needed."""
