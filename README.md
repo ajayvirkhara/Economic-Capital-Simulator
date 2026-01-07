@@ -267,22 +267,31 @@ pip install -r requirements.txt
 Requirements:
 
 ### Core Scientific Stack
-* **numpy** ($\ge 2.1.1$)
-* **pandas** ($\ge 2.2.2$)
-* **scipy** ($\ge 1.14.1$)
+* **numpy** (==2.1.1)
+* **pandas** (==2.2.2)
+* **scipy** (==1.14.1)
 
 ### Risk/Finance Specific
-* **yfinance** ($\ge 0.2.40$)
-* **arch** ($\ge 6.3.0$)
-* **pyyaml** ($\ge 6.0.2$)
+* **yfinance** (==0.2.40)
+* **arch** (==6.3.0)
+* **pyyaml** (==6.0.2)
+* **pandas-datareader** (==0.10.0)
 
-### Development & Testing
-* **pytest** ($\ge 8.4.2$)
-* **pylint** ($\ge 3.2.7$)
-* **black** ($\ge 24.8.0$) - (Used for code formatting)
+### Reporting & Excel
+* **openpyxl** (==3.1.5)
+
+### Testing & Linting
+* **pytest** (==8.4.2)
+* **pre-commit** (==3.8.0)
+
+### Utilities
+* **tqdm** (==4.66.5)
+
+### Development / Build Tools
+* **setuptools** (>=70.0.0)
 
 ### Optional
-* **jupyter** - (Required to run the demo notebooks in the `notebooks/` directory)
+* **jupyter** — Required to run the demo notebooks in the `notebooks/` directory
 
 ---
 
