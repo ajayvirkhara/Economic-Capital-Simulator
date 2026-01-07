@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 import numpy as np
 import pandas as pds
+import warnings
 
 from econ_capital.utils import setup_logging, profile_test
 
@@ -53,6 +54,22 @@ class CreditInputs:
     pd_annual: float
     lgd: Optional[float] = None
     recovery: Optional[float] = None
+
+    def __post_init__(self):
+        """Clip and validate inputs at initialization."""
+        if self.lgd is not None:
+            self.lgd = float(np.clip(self.lgd, 0.0, 1.0))
+        if self.recovery is not None:
+            self.recovery = float(np.clip(self.recovery, 0.0, 1.0))
+
+        # Warn if both provided and inconsistent
+        if self.lgd is not None and self.recovery is not None:
+            derived_from_recovery = 1.0 - self.recovery
+            if not np.isclose(self.lgd, derived_from_recovery, atol=1e-6):
+                warnings.warn(
+                    f"Inconsistent LGD ({self.lgd}) and recovery ({self.recovery}); "
+                    "using LGD directly."
+                )
 
     def effective_lgd(self) -> float:
         """Return LGD, deriving from recovery if needed."""

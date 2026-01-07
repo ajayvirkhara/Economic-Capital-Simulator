@@ -48,6 +48,55 @@ class FirmWideECReporter:
             "white": "FFFFFF",
         }
 
+    def _apply_clean_style(self, chart, y_title):
+        chart.y_axis.title = y_title
+        chart.x_axis.delete = False
+        chart.y_axis.delete = False
+        chart.legend = None  # Remove legend
+        chart.varyColors = True  # Different colors for bars
+
+        # Clean layout
+        chart.layout = Layout(manualLayout=ManualLayout(x=0.1, y=0.05, w=0.85, h=0.70))
+
+        # Clean gridlines
+        chart.y_axis.majorGridlines = None
+        chart.y_axis.majorTickMark = "out"
+        chart.x_axis.tickLblPos = "low"
+
+        # Rotate bar labels to prevent collision
+        chart.x_axis.tickLblPos = "low"
+        chart.x_axis.textRotation = -60
+
+        # Data labels on top
+        chart.dataLabels = DataLabelList()
+        chart.dataLabels.showVal = True
+        chart.dataLabels.showCatName = False
+        chart.dataLabels.showLegendKey = False
+        chart.dataLabels.showSerName = False
+        chart.dataLabels.position = "outEnd"
+        chart.dataLabels.showLeaderLines = False
+
+        # Data label formatting
+        chart.dataLabels.number_format = '"£"#,##0,,"M"'
+
+    def _autofit_columns(self, ws):
+        for column in ws.columns:
+            max_length = 0
+            column_letter = get_column_letter(column[0].column)
+            for cell in column:
+                cell.alignment = Alignment(wrapText=True, vertical="top")
+                try:
+                    # Check if cell has value and update max_length
+                    val_str = str(cell.value) if cell.value is not None else ""
+                    if len(val_str) > max_length:
+                        max_length = len(val_str)
+                except Exception:
+                    pass
+
+            # Limit max column width to 50 to prevent Excel rendering errors
+            adjusted_width = min(max_length + 2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
+
     def generate_report(self) -> Path:
         wb = Workbook()
         wb.remove(wb.active)
@@ -71,6 +120,10 @@ class FirmWideECReporter:
     def _create_cover_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Cover", 0)
 
+        # Protect sheet for regulatory compliance
+        ws.protection.sheet = True
+        ws.protection.password = "ec_report"
+
         lines = [
             "FIRM-WIDE",
             "ECONOMIC CAPITAL",
@@ -92,37 +145,15 @@ class FirmWideECReporter:
             cell.alignment = Alignment(horizontal="center", vertical="center")
 
         ws.merge_cells("A2:G6")
-
-    def _apply_clean_style(self, chart, y_title):
-        chart.y_axis.title = y_title
-        chart.x_axis.delete = False
-        chart.y_axis.delete = False
-        chart.legend = None  # Remove legend
-        chart.varyColors = True  # Different colors for bars
-
-        # Clean layout
-        chart.layout = Layout(manualLayout=ManualLayout(x=0.1, y=0.1, w=0.8, h=0.75))
-
-        # Clean gridlines
-        chart.y_axis.majorGridlines = None
-        chart.y_axis.majorTickMark = "out"
-        chart.x_axis.tickLblPos = "low"
-
-        # Rotate bar labels to prevent collision
-        chart.x_axis.tickLblPos = "low"
-        chart.x_axis.textRotation = -45
-
-        # Data labels on top
-        chart.dataLabels = DataLabelList()
-        chart.dataLabels.showVal = True
-        chart.dataLabels.showCatName = False
-        chart.dataLabels.showLegendKey = False
-        chart.dataLabels.showSerName = False
-        chart.dataLabels.position = "outEnd"
-        chart.dataLabels.showLeaderLines = False
+        self._autofit_columns(ws)
 
     def _create_summary_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Executive Summary", 1)
+
+        # Protect sheet for regulatory compliance
+        ws.protection.sheet = True
+        ws.protection.password = "ec_report"
+
         ws["A1"] = "Firm-Wide Economic Capital Summary"
         ws["A1"].font = Font(size=18, bold=True, color=self.colors["header"])
 
@@ -154,12 +185,18 @@ class FirmWideECReporter:
             ws[f"A{i}"] = label
             ws[f"B{i}"] = value
             ws[f"A{i}"].font = Font(bold=True)
-            ws[f"B{i}"].number_format = (
-                "#,##0" if isinstance(value, str) and "£" in value else ""
-            )
+            if label != "Run Timestamp":
+                ws[f"B{i}"].number_format = '"£"#,##0'
+        self._autofit_columns(ws)
+        self._autofit_columns(ws)
 
     def _create_risk_contributions_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Risk Contributions", 2)
+
+        # Protect sheet for regulatory compliance
+        ws.protection.sheet = True
+        ws.protection.password = "ec_report"
+
         ws["A1"] = "Individual Risk Contributions"
         ws["A1"].font = Font(size=16, bold=True, color=self.colors["header"])
 
@@ -183,7 +220,8 @@ class FirmWideECReporter:
         for r, (risk, row) in enumerate(df.iterrows(), 4):
             ws.cell(r, 1, risk)
             for c, val in enumerate(row, 2):
-                ws.cell(r, c, val)
+                cell = ws.cell(r, c, val)
+                cell.number_format = '"£"#,##0'
 
         # Format as table
         last_row = len(df) + 3
@@ -196,9 +234,15 @@ class FirmWideECReporter:
             name="TableStyleMedium9", showRowStripes=True
         )
         ws.add_table(tab)
+        self._autofit_columns(ws)
 
     def _create_marginal_waterfall_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Marginal Contributions", 3)
+
+        # Protect sheet for regulatory compliance
+        ws.protection.sheet = True
+        ws.protection.password = "ec_report"
+
         ws["A1"] = "Marginal Economic Capital Contributions"
         ws["A1"].font = Font(size=16, bold=True, color=self.colors["header"])
 
@@ -218,7 +262,7 @@ class FirmWideECReporter:
         for r, (risk, contrib) in enumerate(df.itertuples(), 4):
             ws.cell(r, 1, risk)
             ws.cell(r, 2, contrib)
-            ws.cell(r, 2).number_format = "£#,##0"
+            ws.cell(r, 2).number_format = '"£"#,##0'
             if r <= 6:  # Top 3 gold highlight
                 for c in [1, 2]:
                     ws.cell(r, c).fill = PatternFill(
@@ -254,9 +298,15 @@ class FirmWideECReporter:
             name="TableStyleMedium2", showRowStripes=True
         )
         ws.add_table(tab)
+        self._autofit_columns(ws)
 
     def _create_detailed_market_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Detailed Market Risk", 4)
+
+        # Protect sheet for regulatory compliance
+        ws.protection.sheet = True
+        ws.protection.password = "ec_report"
+
         ws["A1"] = "Detailed Market Risk Breakdown"
         ws["A1"].font = Font(size=16, bold=True, color=self.colors["header"])
 
@@ -273,7 +323,7 @@ class FirmWideECReporter:
             cell.font = Font(color="FFFFFF", bold=True)
             cell.alignment = Alignment(horizontal="center")
 
-        top_n = breakdown.head(10)
+        top_n = breakdown
         num_items = len(top_n)
 
         # Define variables for row tracking
@@ -294,23 +344,18 @@ class FirmWideECReporter:
         chart = BarChart()
         chart.type = "col"
         chart.style = 10
-        chart.title = "Top 10 Market Capital Impacts"
+        chart.title = "Top Market Capital Impacts"
         chart.y_axis.title = "Capital (£)"
         chart.x_axis.title = "Position"
 
         # Data and categories
         data = Reference(ws, min_col=3, min_row=start_top10, max_row=last_row)
         cats = Reference(ws, min_col=2, min_row=start_top10, max_row=last_row)
-        chart.add_data(data, titles_from_data=True)
+        chart.add_data(data, titles_from_data=False)
         chart.set_categories(cats)
 
         # Y-axis formatting
-        max_value = top_n.max() if not top_n.empty else 0
         chart.y_axis.number_format = '"£"#,##0'
-        chart.y_axis.scaling.min = 0  # Force min to 0 if negative values possible
-        chart.y_axis.majorUnit = (
-            1000000 if max_value > 1e7 else 100000
-        )  # Dynamic major ticks; replace max_value with actual max from data
 
         self._apply_clean_style(chart, "Capital Contribution (£)")
         ws.add_chart(chart, "E2")
@@ -325,9 +370,15 @@ class FirmWideECReporter:
                 name="TableStyleMedium2", showRowStripes=True
             )
             ws.add_table(tab)
+        self._autofit_columns(ws)
 
     def _create_detailed_credit_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Detailed Credit Risk", 5)
+
+        # Protect sheet for regulatory compliance
+        ws.protection.sheet = True
+        ws.protection.password = "ec_report"
+
         ws["A1"] = "Detailed Credit Risk Portfolio"
         ws["A1"].font = Font(size=16, bold=True, color=self.colors["header"])
 
@@ -359,7 +410,7 @@ class FirmWideECReporter:
                     elif header == "LGD":
                         cell.number_format = "0.00"
                     elif header in ["EAD", "EL", "UL", "EC_Marginal"]:
-                        cell.number_format = "£#,##0"
+                        cell.number_format = '"£"#,##0'
 
         # Table
         last_row = len(df) + 3
@@ -372,9 +423,15 @@ class FirmWideECReporter:
             name="TableStyleMedium2", showRowStripes=True
         )
         ws.add_table(tab)
+        self._autofit_columns(ws)
 
     def _create_detailed_oprisk_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Detailed Op Risk", 6)
+
+        # Protect sheet for regulatory compliance
+        ws.protection.sheet = True
+        ws.protection.password = "ec_report"
+
         ws["A1"] = "Detailed Op Risk Scenarios"
         ws["A1"].font = Font(size=16, bold=True, color=self.colors["header"])
 
@@ -398,12 +455,20 @@ class FirmWideECReporter:
             raw_results, key=lambda x: getattr(x, "uplift_factor", 0), reverse=True
         )[:10]
 
-        headers = ["Rank", "ScenarioID", "Description", "Uplift ×", "Stressed Capital"]
+        headers = [
+            "Rank",
+            "ScenarioID",
+            "Description",
+            "Baseline Cap",
+            "Stressed Capital",
+            "Uplift",
+        ]
         for c, h in enumerate(headers, 1):
             cell = ws.cell(3, c, h)
             cell.fill = PatternFill("solid", self.colors["header"])
             cell.font = Font(color="FFFFFF", bold=True)
             cell.alignment = Alignment(horizontal="center")
+            cell.number_format = '"£"#,##0'
 
         # Write data rows
         for i, r in enumerate(top10, 4):
@@ -411,23 +476,27 @@ class FirmWideECReporter:
             ws.cell(i, 2, str(getattr(r, "name", "N/A") or "N/A"))
             ws.cell(i, 3, str(getattr(r, "description", "---") or "---"))
 
-            # Uplift as raw float
-            uplift_cell = ws.cell(i, 4, float(getattr(r, "uplift_factor", 0.0)))
-            uplift_cell.number_format = "0.00"
+            # Baseline capital
+            base_cap = float(getattr(r, "capital_base", 0.0))
+            ws.cell(i, 4, base_cap).number_format = '"£"#,##0'
 
-            # Capital as raw float
-            cap_cell = ws.cell(i, 5, float(getattr(r, "capital_stressed", 0.0)))
-            cap_cell.number_format = "#,##0"
+            # Stressed capital
+            stressed_cap = float(getattr(r, "capital_stressed", 0.0))
+            ws.cell(i, 5, stressed_cap).number_format = '"£"#,##0'
+
+            # Uplift as raw float
+            uplift = float(getattr(r, "uplift_factor", 0.0))
+            ws.cell(i, 6, uplift).number_format = "0.00x"
 
             if i - 3 <= 3:  # Top 3 highlighting
-                for c in range(1, 6):
+                for c in range(1, 7):
                     ws.cell(i, c).fill = PatternFill("solid", self.colors["gold"])
 
         # Table definition with strictly unique name and checked range
         last_row = len(top10) + 3
         if len(top10) > 0:
             tab = Table(
-                displayName=f"OpRiskTop10_{self.timestamp}", ref=f"A3:E{last_row}"
+                displayName=f"OpRiskTop10_{self.timestamp}", ref=f"A3:F{last_row}"
             )
 
             # Style
@@ -469,9 +538,15 @@ class FirmWideECReporter:
                 name="TableStyleMedium2", showRowStripes=True
             )
             ws.add_table(expert_tab)
+        self._autofit_columns(ws)
 
     def _create_correlation_matrix_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Correlation Matrix", 7)
+
+        # Protect sheet for regulatory compliance
+        ws.protection.sheet = True
+        ws.protection.password = "ec_report"
+
         ws["A1"] = "Inter-Risk Correlation Matrix"
         ws["A1"].font = Font(size=16, bold=True, color=self.colors["header"])
 
@@ -518,9 +593,15 @@ class FirmWideECReporter:
             ws.add_table(tab)
         except Exception:
             pass
+        self._autofit_columns(ws)
 
     def _create_sensitivity_analysis_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Sensitivity Analysis", 8)
+
+        # Protect sheet for regulatory compliance
+        ws.protection.sheet = True
+        ws.protection.password = "ec_report"
+
         ws["A1"] = "Sensitivity to Confidence Level"
         ws["A1"].font = Font(size=16, bold=True, color=self.colors["header"])
 
@@ -568,31 +649,14 @@ class FirmWideECReporter:
         chart.add_data(data, titles_from_data=False)
         chart.set_categories(cats)
 
-        # Axis Labels and Lines
+        # Axis Labels
         chart.y_axis.title = "Economic Capital (£)"
         chart.x_axis.title = "Confidence Level"
-        chart.x_axis.delete = False  # Explicitly show X-axis labels
-        chart.y_axis.delete = False
-        chart.layout = Layout(manualLayout=ManualLayout(x=0.15, y=0.1, w=0.75, h=0.75))
 
-        # Add Tick Marks and Gridlines for better readability
-        chart.y_axis.majorGridlines = None
-        chart.y_axis.majorTickMark = "out"
-        chart.x_axis.tickLblPos = "low"
-
-        # Fix Data Labels
-        chart.dataLabels = DataLabelList()
-        chart.dataLabels.showVal = True  # Show the £ value
-        chart.dataLabels.showCatName = False  # Hide the "99.0%" text in the label
-        chart.dataLabels.showSerName = False  # Hide the "Series1" text
-        chart.dataLabels.showLegendKey = False  # Removes coloured squares
-        chart.dataLabels.position = "outEnd"  # Place label above the bar
-
-        # Final polish
-        chart.legend = None  # Legend is unnecessary since labels are on the X-axis
-        chart.varyColors = True
+        self._apply_clean_style(chart, "Economic Capital (£)")
 
         ws.add_chart(chart, "E2")
+        self._autofit_columns(ws)
 
 
 def generate_firmwide_ec_report(
