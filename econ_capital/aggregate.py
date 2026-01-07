@@ -10,7 +10,10 @@ import pandas as pd
 from typing import Dict, Any, Tuple, Optional
 from scipy.stats import norm
 
+from econ_capital.utils import setup_logging
 from econ_capital.market_risk.shocks import mv_t_draws
+
+logger = setup_logging(__name__)
 
 
 def normalize_risk_results(
@@ -25,16 +28,18 @@ def normalize_risk_results(
     z = norm.ppf(confidence_level)
 
     # Validate all required keys
-    required_market = ["es_1y_999"]  # VaR optional
-    for key in required_market:
-        if key not in market_results:
-            raise KeyError(f"Missing {key} in market_results")
 
-    required_credit = ["EL_total", "UL_total"]
-    for key in required_credit:
-        if key not in credit_results:
-            raise KeyError(f"Missing {key} in credit_results")
+    # Market risk: prefer ES, fall back to VaR, default to 0
+    if "es_1y_999" not in market_results and "var_1y_999" not in market_results:
+        logger.warning("No market VaR or ES found; treating market risk as zero")
 
+    # Credit risk: default both to 0.0 if missing
+    if "EL_total" not in credit_results:
+        credit_results["EL_total"] = 0.0
+    if "UL_total" not in credit_results:
+        credit_results["UL_total"] = 0.0
+
+    # Op risk: require both capital_999 and expected_loss
     required_op = ["capital_999", "expected_loss"]
     for key in required_op:
         if key not in op_results:
