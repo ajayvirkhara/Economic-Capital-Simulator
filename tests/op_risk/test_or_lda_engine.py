@@ -5,6 +5,7 @@ import pytest
 import numpy as np
 import pandas as pd
 from pytest import raises
+import warnings
 
 # Module under test
 from econ_capital.op_risk.lda_engine import (
@@ -16,6 +17,15 @@ from econ_capital.op_risk.lda_engine import (
 # -------------------------------------------------------------------
 # Fixtures
 # -------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def suppress_scipy_warnings():
+    warnings.filterwarnings(
+        "ignore",
+        category=RuntimeWarning,
+        message="invalid value encountered in subtract",
+    )
 
 
 @pytest.fixture(name="config_fx", scope="module")
