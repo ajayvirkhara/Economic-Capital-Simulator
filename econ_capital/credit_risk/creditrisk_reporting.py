@@ -15,6 +15,8 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 
 from .exposure_engine import ExposureEngine
 
+from econ_capital.reporting_utils import apply_clean_style, autofit_columns
+
 
 class CreditRiskReporter:
     def __init__(
@@ -69,8 +71,8 @@ class CreditRiskReporter:
         self._create_full_portfolio_sheet(wb)
 
         wb.save(self.filename)
-        print(f"Report generated: {self.filename}")
         return self.filename
+    
 
     @property
     def baseline_capital(self) -> float:
@@ -95,6 +97,7 @@ class CreditRiskReporter:
             )
             cell.alignment = Alignment(horizontal="center")
         ws.merge_cells("A2:F4")
+        autofit_columns(ws)
 
     def _create_summary_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Summary", 1)
@@ -116,6 +119,7 @@ class CreditRiskReporter:
             ws[f"A{i}"] = k
             ws[f"B{i}"] = v
             ws[f"A{i}"].font = Font(bold=True)
+        autofit_columns(ws)
 
     def _create_results_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Detailed Results", 2)
@@ -149,6 +153,7 @@ class CreditRiskReporter:
             ws.add_table(tab)
         else:
             ws["A2"] = "No results available"
+        autofit_columns(ws)
 
     def _create_waterfall_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Waterfall", 3)
@@ -171,14 +176,16 @@ class CreditRiskReporter:
 
         chart = BarChart()
         chart.title = "Top 10 Capital Impacts"
-        chart.y_axis.title = "Capital (£)"
         chart.height = 14
         chart.width = 24
         data_ref = Reference(ws, min_col=2, min_row=1, max_row=len(data))
         cats = Reference(ws, min_col=1, min_row=2, max_row=len(data))
         chart.add_data(data_ref, titles_from_data=True)
         chart.set_categories(cats)
+
+        apply_clean_style(chart, "Capital (£)", num_points=len(data))
         ws.add_chart(chart, "D2")
+        autofit_columns(ws)
 
     def _create_full_portfolio_sheet(self, wb: Workbook):
         """Creates a detailed table of all counterparties."""
@@ -226,6 +233,7 @@ class CreditRiskReporter:
             name="TableStyleMedium2", showRowStripes=True, showColumnStripes=False
         )
         ws.add_table(tab)
+        autofit_columns(ws)
 
 
 def generate_creditrisk_report(

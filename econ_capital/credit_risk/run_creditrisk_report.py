@@ -13,6 +13,7 @@ import yaml
 import numpy as np
 import pandas as pd
 from scipy.stats import norm
+import logging
 
 # Internal package imports
 from econ_capital.credit_risk.data_loaders import (
@@ -25,6 +26,10 @@ from econ_capital.credit_risk.exposure_engine import ExposureEngine
 from econ_capital.credit_risk.creditrisk_reporting import generate_creditrisk_report
 from econ_capital.credit_risk.config import DEFAULT_CONFIG
 
+# Silence the noisy exposure engine logger
+lda_logger = logging.getLogger("econ_capital.credit_risk.exposure_engine")
+lda_logger.setLevel(logging.WARNING)
+lda_logger.propagate = False
 
 def main():
     # ------------------------------------------------------------------
@@ -39,8 +44,8 @@ def main():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    print("--- Credit Risk Report Engine ---")
-    print(f"Root: {PROJECT_ROOT}")
+    print("\n--- Credit Risk Report Engine ---\n")
+    print(f"Root: {PROJECT_ROOT}\n")
 
     # ------------------------------------------------------------------
     # 2. LOAD CONFIG
@@ -59,7 +64,7 @@ def main():
     csv_file = DATA_DIR / "counterparty_exposures.csv"
 
     if csv_file.exists():
-        print(f"Loading exposures from: {csv_file}")
+        print(f"Loading exposures from: {csv_file}\n")
         df_positions = load_issuer_spreads_csv(str(csv_file))
         # Filter for EAD measures
         df_positions = df_positions[df_positions["measure"].str.upper() == "EAD"]
@@ -71,7 +76,7 @@ def main():
     # 4. SIMULATION & RISK ENGINE
     # ------------------------------------------------------------------
     unique_cptys = df_positions["counterparty"].unique()
-    print(f"Simulating risks for {len(unique_cptys)} counterparties...")
+    print(f"Simulating risks for {len(unique_cptys)} counterparties...\n")
 
     # Shared market paths for systematic exposure (Stylized GBM)
     n_paths = config.get("n_paths", 10000)
@@ -197,9 +202,32 @@ def main():
         config=config, engine=None, results=report_data, output_dir=str(REPORTS_DIR)
     )
 
-    print(f"\nReport successfully generated: {output_path.name}")
-    print(f"Target Directory: {REPORTS_DIR}")
-    print(f"Total Portfolio EC: £{EC_total:,.2f}")
+    # Detailed Terminal Output
+    print("\n" + "=" * 70)
+    print("CREDIT RISK EXECUTION SUMMARY")
+    print("=" * 70)
+    print(f"{'Report Name:':<20} {output_path.name}")
+    print(f"{'Total EL:':<20} £{EL_total:,.2f}")
+    print(f"{'Total UL:':<20} £{UL_total:,.2f}")
+    print(f"{'Portfolio EC:':<20} £{EC_total:,.2f}")
+    print("-" * 70)
+
+    # Sector Breakdown
+    print("EC by Sector:")
+    sector_summary = df_results.groupby("Sector")["EC_Marginal"].sum()
+    for sector, val in sector_summary.items():
+        print(f"  {sector:<18} £{val:,.2f}")
+
+    print("-" * 70)
+
+    # Top 5 Counterparties
+    print(f"{'Top 5 Counterparties by Marginal EC':<35} {'EC Contribution'}")
+    for _, row in df_results.head(5).iterrows():
+        print(f"  {row['name']:<33} £{row['EC_Marginal']:,.2f}")
+
+    print("=" * 70 + "\n")
+
+    print(f"\nReport successfully generated: {output_path}\n")
 
     return report_data
 
