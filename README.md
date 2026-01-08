@@ -318,7 +318,7 @@ python -m econ_capital.op_risk
 **Full Firm-Wide Economic Capital (All Risks + Diversification)**
 
 ```bash
-python econ_capital/run_full_ec.py
+python -m econ_capital.run_full_ec
 ```
 
 ---

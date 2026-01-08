@@ -38,7 +38,7 @@ op_risk:
       frequency_multiplier: 5
 
   simulation:
-    num_simulations: 100000
+    num_simulations: 25000
     confidence_level: 0.999
     random_seed: 40
     VAR_LEVELS: [0.95, 0.99, 0.995, 0.999]
