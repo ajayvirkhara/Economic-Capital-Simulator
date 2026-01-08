@@ -14,7 +14,8 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.utils import get_column_letter
 
 from .stress_tests import OpRiskStressTester, StressTestResult
-from .scenarios import ScenarioSet
+
+from econ_capital.reporting_utils import apply_clean_style, autofit_columns
 
 
 class OpRiskReporter:
@@ -63,7 +64,6 @@ class OpRiskReporter:
         self._create_summary_sheet(wb)
         self._create_results_sheet(wb)
         self._create_waterfall_sheet(wb)
-        self._create_top10_sheet(wb)
         self._create_expert_scenarios_sheet(wb)
 
         wb.save(self.filename)
@@ -89,6 +89,7 @@ class OpRiskReporter:
             )
             cell.alignment = Alignment(horizontal="center")
         ws.merge_cells("A2:F4")
+        autofit_columns(ws)
 
     def _create_summary_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Summary", 1)
@@ -106,6 +107,7 @@ class OpRiskReporter:
             ws[f"A{i}"] = k
             ws[f"B{i}"] = v
             ws[f"A{i}"].font = Font(bold=True)
+        autofit_columns(ws)
 
     def _create_results_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Detailed Results", 2)
@@ -140,6 +142,9 @@ class OpRiskReporter:
             ]
             for c, val in enumerate(row, 1):
                 ws.cell(i + 1, c, val)
+                # Apply gold highlight to top 3 contributors
+                if i <= 3:
+                    ws.cell(i + 1, c).fill = PatternFill("solid", self.colors["gold"])
 
         if len(self.results) > 0:
             last_row = len(self.results) + 1
@@ -152,6 +157,7 @@ class OpRiskReporter:
             ws.add_table(tab)
         else:
             ws["A2"] = "No stress test results available"
+        autofit_columns(ws)
 
     def _create_waterfall_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Waterfall", 3)
@@ -164,12 +170,11 @@ class OpRiskReporter:
 
         for r, (name, val) in enumerate(data, 2):
             ws[f"A{r}"] = name
-            ws[f"B{r}"] = val
+            ws[f"B{r}"] = float(val)
             ws[f"B{r}"].number_format = "£#,##0"
 
         chart = BarChart()
         chart.title = "Top 10 Capital Impacts"
-        chart.y_axis.title = "Capital (£)"
         chart.height = 14
         chart.width = 24
         data_ref = Reference(ws, min_col=2, min_row=1, max_row=len(data))
@@ -178,43 +183,8 @@ class OpRiskReporter:
         chart.set_categories(cats)
         ws.add_chart(chart, "D2")
 
-    def _create_top10_sheet(self, wb: Workbook):
-        ws = wb.create_sheet("Top 10 Risks", 4)
-        ws["A1"] = "Top 10 Most Severe Scenarios"
-        ws["A1"].font = Font(size=16, bold=True, color=self.colors["header"])
-
-        headers = ["Rank", "Scenario", "Description", "Uplift ×", "Stressed Capital"]
-        for c, h in enumerate(headers, 1):
-            cell = ws.cell(1, c, h)
-            cell.fill = PatternFill("solid", self.colors["header"])
-            cell.font = Font(color="FFFFFF", bold=True)
-
-        # Write the data rows
-        for i, r in enumerate(self.results[:10], 1):
-            row = [
-                i,
-                r.name,
-                r.description or "—",
-                f"{r.uplift_factor:.2f}x",
-                f"£{r.capital_stressed:,.0f}",
-            ]
-            for c, val in enumerate(row, 1):
-                ws.cell(i + 1, c, val)
-                if i <= 3:
-                    ws.cell(i + 1, c).fill = PatternFill("solid", self.colors["gold"])
-
-        # Only create table if there's at least one data row
-        if len(self.results) > 0:
-            last_row = len(self.results[:10]) + 1  # +1 for header
-            table_range = f"A1:E{last_row}"
-            tab = Table(displayName="Top10Risks", ref=table_range)
-            tab.tableStyleInfo = TableStyleInfo(
-                name="TableStyleMedium2", showRowStripes=True
-            )
-            ws.add_table(tab)
-        else:
-            # Add a message if no results/no rows present
-            ws["A2"] = "No stress test results available"
+        apply_clean_style(chart, "Capital (£)", num_points=len(data))
+        autofit_columns(ws)
 
     def _create_expert_scenarios_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Expert Scenarios", 5)
@@ -254,21 +224,21 @@ class OpRiskReporter:
 
         for col in "ABCD":
             ws.column_dimensions[col].width = 25
+        autofit_columns(ws)
 
 
 def generate_oprisk_report(
+    tester: OpRiskStressTester,
+    results: List[StressTestResult],
     config: Dict[str, Any],
-    scenario_set: ScenarioSet,
-    config_path: str,
-    parallel: bool = True,
-    output_dir: str = "reports",
+    output_dir: str | Path = "reports",
 ) -> Path:
-    tester = OpRiskStressTester(config_path)
-    _ = tester.baseline
-    results = tester.run_scenario_set(scenario_set, parallel=parallel)
+    """
+    Generate the Excel report using already-computed tester and stress test results.
+    """
     return OpRiskReporter(
-        tester,
-        results,
-        config,
-        output_dir,  # ← Use the passed config
+        tester=tester,
+        results=results,
+        config=config,
+        output_dir=output_dir,
     ).generate_full_report()

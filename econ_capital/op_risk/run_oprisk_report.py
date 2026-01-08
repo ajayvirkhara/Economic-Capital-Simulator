@@ -10,6 +10,7 @@ import sys
 
 import numpy as np
 import yaml
+import logging
 
 from econ_capital.op_risk.scenarios import (
     Scenario,
@@ -19,6 +20,10 @@ from econ_capital.op_risk.oprisk_reporting import generate_oprisk_report
 from econ_capital.op_risk.stress_tests import OpRiskStressTester
 from econ_capital.op_risk.lda_engine import lda_run_engine
 
+# Silence the noisy LDA engine logger
+lda_logger = logging.getLogger("econ_capital.op_risk.lda_engine")
+lda_logger.setLevel(logging.WARNING)
+lda_logger.propagate = False
 
 def main() -> float:
     # ──────────────────────────────────────────────────────────────
@@ -144,10 +149,10 @@ def main() -> float:
     tester = OpRiskStressTester(config_path=str(CONFIG_PATH))
     _ = tester.baseline  # Trigger baseline run to cache capital
 
+    results = tester.run_scenario_set(final_set, parallel=True)
+
     print("\n=== DEBUG: STRESS TEST RESULTS ===")
     try:
-        results = tester.run_scenario_set(final_set, parallel=True)
-
         print(
             f"{'Scenario':<35} {'Base Capital':>15} {'Stressed Capital':>18} {'Uplift':>12} {'Time (s)':>10}"
         )
@@ -169,28 +174,15 @@ def main() -> float:
     # ──────────────────────────────────────────────────────────────
     # GENERATE FINAL REPORT
     # ──────────────────────────────────────────────────────────────
-    report_path = generate_oprisk_report(
-        config=config,
-        config_path=str(CONFIG_PATH),
-        scenario_set=final_set,
-        parallel=True,
-        output_dir=str(REPORT_DIR),
-    )
-
-    print("\nREPORT SUCCESSFULLY GENERATED!")
-    print(f"Location: {report_path}")
-
     # Explicitly get full baseline metrics for firm-wide aggregation
     base_config = tester.get_base_config_for_tests()
     _, _, baseline_metrics = lda_run_engine(base_config)
-
-    results = tester.run_scenario_set(final_set, parallel=True)
 
     max_stressed = max(
         (r.capital_stressed for r in results), default=tester.baseline_capital
     )
     total_oprisk_capital = max(scenario_capital, max_stressed)
-    return {
+    results_dict = {
         "total_capital": total_oprisk_capital,
         "stress_test_results": results,
         "expert_scenario_details": config.get("expert_scenario_details", []),
@@ -199,6 +191,26 @@ def main() -> float:
         "expected_loss": baseline_metrics.get("expected_loss", 0.0),
     }
 
+    # Generate the actual Excel report
+    generate_oprisk_report(
+        tester=tester,
+        results=results,
+        config=config,
+        output_dir=str(REPORT_DIR),
+    )
+
+    print("\nREPORT SUCCESSFULLY GENERATED!")
+
+    # Print results summary
+    print("\n=== Operational Risk Economic Capital Summary ===")
+    print(f"Total OpRisk Capital (incl. stress): £{total_oprisk_capital:,.0f}")
+    print(f"Baseline Expected Loss: £{baseline_metrics.get('expected_loss', 0):,.0f}")
+    print(
+        f"Max Stressed Capital Uplift: £{max_stressed - tester.baseline_capital:,.0f}"
+    )
+
+    return results_dict
+
 
 if __name__ == "__main__":
-    main()
+    results = main()
