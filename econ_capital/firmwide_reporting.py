@@ -15,9 +15,8 @@ from openpyxl.chart import BarChart, Reference
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
-from openpyxl.chart.label import DataLabelList
-from openpyxl.chart.layout import Layout, ManualLayout
 
+from econ_capital.reporting_utils import apply_clean_style, autofit_columns
 from econ_capital.aggregate import aggregate_economic_capital
 
 
@@ -47,55 +46,6 @@ class FirmWideECReporter:
             "light_gold": "FFF2CC",
             "white": "FFFFFF",
         }
-
-    def _apply_clean_style(self, chart, y_title):
-        chart.y_axis.title = y_title
-        chart.x_axis.delete = False
-        chart.y_axis.delete = False
-        chart.legend = None  # Remove legend
-        chart.varyColors = True  # Different colors for bars
-
-        # Clean layout
-        chart.layout = Layout(manualLayout=ManualLayout(x=0.1, y=0.05, w=0.85, h=0.70))
-
-        # Clean gridlines
-        chart.y_axis.majorGridlines = None
-        chart.y_axis.majorTickMark = "out"
-        chart.x_axis.tickLblPos = "low"
-
-        # Rotate bar labels to prevent collision
-        chart.x_axis.tickLblPos = "low"
-        chart.x_axis.textRotation = -60
-
-        # Data labels on top
-        chart.dataLabels = DataLabelList()
-        chart.dataLabels.showVal = True
-        chart.dataLabels.showCatName = False
-        chart.dataLabels.showLegendKey = False
-        chart.dataLabels.showSerName = False
-        chart.dataLabels.position = "outEnd"
-        chart.dataLabels.showLeaderLines = False
-
-        # Data label formatting
-        chart.dataLabels.number_format = '"£"#,##0,,"M"'
-
-    def _autofit_columns(self, ws):
-        for column in ws.columns:
-            max_length = 0
-            column_letter = get_column_letter(column[0].column)
-            for cell in column:
-                cell.alignment = Alignment(wrapText=True, vertical="top")
-                try:
-                    # Check if cell has value and update max_length
-                    val_str = str(cell.value) if cell.value is not None else ""
-                    if len(val_str) > max_length:
-                        max_length = len(val_str)
-                except Exception:
-                    pass
-
-            # Limit max column width to 50 to prevent Excel rendering errors
-            adjusted_width = min(max_length + 2, 50)
-            ws.column_dimensions[column_letter].width = adjusted_width
 
     def generate_report(self) -> Path:
         wb = Workbook()
@@ -145,7 +95,7 @@ class FirmWideECReporter:
             cell.alignment = Alignment(horizontal="center", vertical="center")
 
         ws.merge_cells("A2:G6")
-        self._autofit_columns(ws)
+        autofit_columns(ws)
 
     def _create_summary_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Executive Summary", 1)
@@ -187,8 +137,7 @@ class FirmWideECReporter:
             ws[f"A{i}"].font = Font(bold=True)
             if label != "Run Timestamp":
                 ws[f"B{i}"].number_format = '"£"#,##0'
-        self._autofit_columns(ws)
-        self._autofit_columns(ws)
+        autofit_columns(ws)
 
     def _create_risk_contributions_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Risk Contributions", 2)
@@ -234,7 +183,7 @@ class FirmWideECReporter:
             name="TableStyleMedium9", showRowStripes=True
         )
         ws.add_table(tab)
-        self._autofit_columns(ws)
+        autofit_columns(ws)
 
     def _create_marginal_waterfall_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Marginal Contributions", 3)
@@ -275,7 +224,6 @@ class FirmWideECReporter:
         chart.type = "col"
         chart.style = 10
         chart.title = "Marginal Economic Capital by Risk Type"
-        chart.y_axis.title = "Contribution (£)"
         chart.x_axis.title = "Risk Type"
 
         # Data
@@ -286,7 +234,7 @@ class FirmWideECReporter:
             chart.series[0].name = ""  # Explicitly set series name to empty string
         chart.set_categories(cats)
 
-        self._apply_clean_style(chart, "Marginal EC (£)")
+        apply_clean_style(chart, "Marginal EC (£)")
         ws.add_chart(chart, "E2")
 
         # Table
@@ -298,7 +246,7 @@ class FirmWideECReporter:
             name="TableStyleMedium2", showRowStripes=True
         )
         ws.add_table(tab)
-        self._autofit_columns(ws)
+        autofit_columns(ws)
 
     def _create_detailed_market_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Detailed Market Risk", 4)
@@ -345,7 +293,6 @@ class FirmWideECReporter:
         chart.type = "col"
         chart.style = 10
         chart.title = "Top Market Capital Impacts"
-        chart.y_axis.title = "Capital (£)"
         chart.x_axis.title = "Position"
 
         # Data and categories
@@ -357,7 +304,7 @@ class FirmWideECReporter:
         # Y-axis formatting
         chart.y_axis.number_format = '"£"#,##0'
 
-        self._apply_clean_style(chart, "Capital Contribution (£)")
+        apply_clean_style(chart, "Capital Contribution (£)")
         ws.add_chart(chart, "E2")
 
         # Table
@@ -370,7 +317,7 @@ class FirmWideECReporter:
                 name="TableStyleMedium2", showRowStripes=True
             )
             ws.add_table(tab)
-        self._autofit_columns(ws)
+        autofit_columns(ws)
 
     def _create_detailed_credit_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Detailed Credit Risk", 5)
@@ -423,7 +370,7 @@ class FirmWideECReporter:
             name="TableStyleMedium2", showRowStripes=True
         )
         ws.add_table(tab)
-        self._autofit_columns(ws)
+        autofit_columns(ws)
 
     def _create_detailed_oprisk_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Detailed Op Risk", 6)
@@ -538,7 +485,7 @@ class FirmWideECReporter:
                 name="TableStyleMedium2", showRowStripes=True
             )
             ws.add_table(expert_tab)
-        self._autofit_columns(ws)
+        autofit_columns(ws)
 
     def _create_correlation_matrix_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Correlation Matrix", 7)
@@ -593,7 +540,7 @@ class FirmWideECReporter:
             ws.add_table(tab)
         except Exception:
             pass
-        self._autofit_columns(ws)
+        autofit_columns(ws)
 
     def _create_sensitivity_analysis_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Sensitivity Analysis", 8)
@@ -638,7 +585,6 @@ class FirmWideECReporter:
         chart.type = "col"
         chart.style = 10
         chart.title = "EC Sensitivity to Confidence Level"
-        chart.y_axis.title = "Economic Capital (£)"
         chart.x_axis.title = "Confidence Level"
         chart.height = 12
         chart.width = 18
@@ -649,14 +595,13 @@ class FirmWideECReporter:
         chart.add_data(data, titles_from_data=False)
         chart.set_categories(cats)
 
-        # Axis Labels
-        chart.y_axis.title = "Economic Capital (£)"
+        # X-axis Labels
         chart.x_axis.title = "Confidence Level"
 
-        self._apply_clean_style(chart, "Economic Capital (£)")
+        apply_clean_style(chart, "Economic Capital (£)")
 
         ws.add_chart(chart, "E2")
-        self._autofit_columns(ws)
+        autofit_columns(ws)
 
 
 def generate_firmwide_ec_report(
