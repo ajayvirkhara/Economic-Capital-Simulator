@@ -25,6 +25,7 @@ lda_logger = logging.getLogger("econ_capital.op_risk.lda_engine")
 lda_logger.setLevel(logging.WARNING)
 lda_logger.propagate = False
 
+
 def main() -> float:
     # ──────────────────────────────────────────────────────────────
     # PATH & DEBUG SETUP
