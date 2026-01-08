@@ -14,6 +14,8 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 
 from .engine import MarketRiskEconomicCapital
 
+from econ_capital.reporting_utils import apply_clean_style, autofit_columns
+
 
 class MarketRiskReporter:
     def __init__(
@@ -59,7 +61,6 @@ class MarketRiskReporter:
         self._create_cover_sheet(wb)
         self._create_summary_sheet(wb)
         self._create_waterfall_sheet(wb)
-        self._create_top10_sheet(wb)
 
         wb.save(self.filename)
         print(f"Report generated: {self.filename}")
@@ -92,6 +93,7 @@ class MarketRiskReporter:
             )
             cell.alignment = Alignment(horizontal="center")
         ws.merge_cells("A2:F4")
+        autofit_columns(ws)
 
     def _create_summary_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Summary", 1)
@@ -114,67 +116,70 @@ class MarketRiskReporter:
             if k == "Number of Paths":
                 cell.number_format = "#,##0"
             ws[f"A{i}"].font = Font(bold=True)
+        autofit_columns(ws)
 
     def _create_waterfall_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Waterfall", 3)
         ws["A1"] = "Capital Uplift Waterfall"
         ws["A1"].font = Font(size=16, bold=True, color=self.colors["header"])
 
-        baseline = self.results.get("baseline_capital", 0)
-        breakdown = self.results["capital_breakdown"]
-        top10_positions = breakdown.head(10).index.tolist()
-
-        data = [["Baseline", baseline]]
-        for pos in top10_positions:
-            uplift = breakdown.get(pos, 0)
-            data.append([pos, uplift])
-
-        for r, (name, val) in enumerate(data, 2):
-            ws[f"A{r}"] = name
-            ws[f"B{r}"] = val
-            ws[f"B{r}"].number_format = "£#,##0"
-
-        chart = BarChart()
-        chart.title = "Top 10 Capital Impacts"
-        chart.y_axis.title = "Capital (£)"
-        chart.height = 14
-        chart.width = 24
-        data_ref = Reference(ws, min_col=2, min_row=1, max_row=len(data))
-        cats = Reference(ws, min_col=1, min_row=2, max_row=len(data))
-        chart.add_data(data_ref, titles_from_data=True)
-        chart.set_categories(cats)
-        ws.add_chart(chart, "D2")
-
-    def _create_top10_sheet(self, wb: Workbook):
-        ws = wb.create_sheet("Top 10 Positions", 4)
-        ws["A1"] = "Top 10 Capital Contributors"
-        ws["A1"].font = Font(size=16, bold=True, color=self.colors["header"])
-
-        headers = ["Rank", "Position", "Capital Contribution (£)"]
+        # Prepare Data with Headers
+        headers = ["Position", "Capital Contribution (£)"]
         for c, h in enumerate(headers, 1):
-            cell = ws.cell(1, c, h)
+            cell = ws.cell(2, c, h)
             cell.fill = PatternFill("solid", self.colors["header"])
             cell.font = Font(color="FFFFFF", bold=True)
 
+        baseline = self.results.get("baseline_capital", 0)
         breakdown = self.results["capital_breakdown"]
-        for i, (pos, contrib) in enumerate(breakdown.head(10).items(), 1):
-            ws.cell(i + 1, 1, i)
-            ws.cell(i + 1, 2, pos)
-            ws.cell(i + 1, 3, f"£{contrib:,.0f}").number_format = "£#,##0"
-            if i <= 3:
-                for c in range(1, 4):
-                    ws.cell(i + 1, c).fill = PatternFill("solid", self.colors["gold"])
 
-        if len(breakdown) > 0:
-            last_row = min(len(breakdown), 10) + 1
-            table_range = f"A1:C{last_row}"
-            tab = Table(displayName="Top10Positions", ref=table_range)
-            tab.tableStyleInfo = TableStyleInfo(
-                name="TableStyleMedium2", showRowStripes=True
-            )
-            ws.add_table(tab)
-        else:
-            ws["A2"] = "No capital breakdown available"
+        # Starting data at row 3
+        ws.cell(3, 1, "Baseline")
+        ws.cell(3, 2, baseline).number_format = "£#,##0"
+
+        current_row = 4
+        for i, (pos, uplift) in enumerate(breakdown.head(10).items(), 1):
+            name_cell = ws.cell(current_row, 1, pos)
+            val_cell = ws.cell(current_row, 2, uplift)
+            val_cell.number_format = "£#,##0"
+
+            # Apply gold highlight to top 3 contributors
+            if i <= 3:
+                gold_fill = PatternFill("solid", fgColor=self.colors["gold"])
+                name_cell.fill = gold_fill
+                val_cell.fill = gold_fill
+
+            current_row += 1
+
+        table_range = f"A2:B{current_row - 1}"
+        tab = Table(displayName="WaterfallTable", ref=table_range)
+        tab.tableStyleInfo = TableStyleInfo(
+            name="TableStyleMedium2", showRowStripes=True
+        )
+        ws.add_table(tab)
+
+        # Create chart
+        chart = BarChart()
+        chart.title = "Top Capital Impacts"
+        chart.height = 14
+        chart.width = 24
+        data_ref = Reference(ws, min_col=2, min_row=3, max_row=current_row - 1)
+        cats = Reference(ws, min_col=1, min_row=3, max_row=current_row - 1)
+        chart.add_data(data_ref, titles_from_data=False)
+        chart.set_categories(cats)
+
+        # Calculate number of points to plot
+        num_plot_points = 1 + len(breakdown.head(10))
+
+        apply_clean_style(
+            chart,
+            "Capital Contribution (£)",
+            num_points=num_plot_points,
+        )
+
+        ws.add_chart(chart, "D2")
+
+        autofit_columns(ws)
 
 
 def generate_market_risk_report(

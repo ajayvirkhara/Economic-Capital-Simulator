@@ -236,7 +236,7 @@ class MarketRiskEconomicCapital:
             elapsed,
         )
 
-        # --- Optional Stress Testing ---
+        # --- Stress Testing ---
         stressed_var_1y = stressed_es_1y = None
         stress_shocks = self.config.get("stress_shocks")
         stress_enabled = self.config.get("stress_enabled")
@@ -247,23 +247,31 @@ class MarketRiskEconomicCapital:
             stressed_var_1y = stressed_es_1y = 0.0
         if stress_enabled:
             logger.info("Applying predefined stress shocks for stress testing")
-            # Compute deterministic P&L under stress scenario
-            stress_pnl = 0.0
-            for factor_name, shock_return in stress_shocks.items():
-                if factor_name in self.positions.columns:
-                    # Sum net position in this factor
-                    net_position = self.positions[factor_name].sum()
-                    stress_pnl += net_position * shock_return
-                else:
-                    logger.warning(
-                        "Stress shock defined for unknown factor: %s", factor_name
-                    )
 
-            # Scale to 1-year (same as VaR/ES scaling)
-            stressed_pnl_1y = stress_pnl * scale
-            # Capital requirement is positive loss
-            stressed_var_1y = max(0.0, -stressed_pnl_1y)
-            stressed_es_1y = stressed_var_1y  # Deterministic → VaR = ES
+            # 1. Build a stressed Mean Vector aligned with factor names
+            stressed_mu = np.zeros(self.n_factors)
+            for i, name in enumerate(self.factor_names):
+                # Look up the ticker in stress_shocks; divide by horizon for daily mean
+                if name in stress_shocks:
+                    stressed_mu[i] = stress_shocks[name] / self.horizon_days
+
+            # 2. Get current covariance
+            _, cov = self._estimate_mu_cov()
+
+            # 3. Simulate new shocks centered around the stressed mean
+            n_s = 50_000
+            s_shocks = np.zeros((n_s, self.n_factors))
+            for _ in range(self.horizon_days):
+                s_shocks += mv_t_draws(
+                    n_s, stressed_mu, cov, float(self.config["df_t"]), self.rng
+                )
+
+            # 4. Map to P&L and compute Tail Stats
+            s_pnl, _ = self._pnl_from_shocks(s_shocks)
+
+            # Calculate 1Y scaled results
+            stressed_var_1y = left_tail_var(s_pnl, q) * scale
+            stressed_es_1y = left_tail_es(s_pnl, q) * scale
 
             logger.info(
                 "Stress Test Result: 1Y Stressed Capital = £%.0f", stressed_var_1y

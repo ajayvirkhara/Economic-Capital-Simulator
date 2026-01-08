@@ -79,9 +79,9 @@ def main() -> dict:
         print("-" * 40)
         for k, v in results.items():
             if isinstance(v, (int, float)):
-                print(f"{k:<15} £{v:>18,.0f}")
+                print(f"{k:<25} £{v:>18,.0f}")
             else:
-                print(f"{k:<15} (DataFrame - see breakdown below)")
+                print(f"{k:<25} (DataFrame - see breakdown below)")
 
         print("\nCapital Breakdown (Top 10):")
         print(results["capital_breakdown"].head(10).to_string())
@@ -94,7 +94,7 @@ def main() -> dict:
     # ──────────────────────────────────────────────────────────────
     # GENERATE FINAL REPORT
     # ──────────────────────────────────────────────────────────────
-    report_path = generate_market_risk_report(
+    generate_market_risk_report(
         config=config,
         engine=engine,
         results=results,
@@ -102,7 +102,6 @@ def main() -> dict:
     )
 
     print("\nREPORT SUCCESSFULLY GENERATED!")
-    print(f"Location: {report_path}")
 
     return results
 

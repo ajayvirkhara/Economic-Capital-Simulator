@@ -16,7 +16,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "horizon_days": 10,
     "var_q": 0.999,
     "scaling_days_year": 252,
-    "df_t": 7.0,
+    "df_t": 3.0,
     "cov_method": "EWMA",  # "EWMA" | "SAMPLE" | "GARCH"
     "ewma_lambda": 0.97,
     "fix_mean": True,
