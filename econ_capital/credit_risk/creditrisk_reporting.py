@@ -72,7 +72,6 @@ class CreditRiskReporter:
 
         wb.save(self.filename)
         return self.filename
-    
 
     @property
     def baseline_capital(self) -> float:
