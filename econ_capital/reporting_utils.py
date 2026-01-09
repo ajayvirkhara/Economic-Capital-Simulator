@@ -68,15 +68,15 @@ def apply_clean_style(chart: BarChart, y_title: str, num_points: int = 11) -> No
         if s.dLbls is None:
             s.dLbls = DataLabelList()
 
-        # Data labels formatting
-        s.dLbls.showSourceLinked = False  # Severs the link for the whole series
-        s.dLbls.showVal = True
-        s.dLbls.showCatName = False
-        s.dLbls.showLegendKey = False
-        s.dLbls.showSerName = False
-        s.dLbls.numFmt = '"£"#,##0,,"M"'
-        s.dLbls.position = "outEnd"
-        s.dLbls.showLeaderLines = True
+            # Data labels formatting
+            s.dLbls.showSourceLinked = False  # Severs the link for the whole series
+            s.dLbls.showVal = True
+            s.dLbls.showCatName = False
+            s.dLbls.showLegendKey = False
+            s.dLbls.showSerName = False
+            s.dLbls.numFmt = '"£"#,##0,,"M"'
+            s.dLbls.position = "outEnd"
+            s.dLbls.showLeaderLines = True
 
 
 def autofit_columns(ws: Worksheet) -> None:
