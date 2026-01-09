@@ -128,7 +128,7 @@ class TestSimulateSeverity:
             if k != "tail_prob"
         }
         np.random.seed(42)
-        sevs = simulate_severity(1000, params_no_tail)
+        sevs = simulate_severity(10000, params_no_tail)
         tail_prop = np.mean(sevs >= params_no_tail["threshold"])
         assert abs(tail_prop - 0.05) < 0.03  # Approx
 
