@@ -117,31 +117,30 @@ def simulate_severity(
     tail_prob = params.get("tail_prob", 0.05)
     threshold = params["threshold"]
 
-    is_tail = rng.binomial(1, tail_prob, n_draws)
+    is_tail = rng.random(n_draws) < tail_prob
     sevs = np.zeros(n_draws)
 
     # ---- Body draws ----
-    body_mask = is_tail == 0
-    n_body = np.sum(body_mask)
-    if n_body > 0:
+    body_mask = ~is_tail
+    if body_mask.any():
         sevs[body_mask] = stats.lognorm.rvs(
             s=params["lognormal_sigma"],
             scale=np.exp(params["lognormal_mu"]),
-            size=n_body,
+            size=body_mask.sum(),
+            random_state=rng,
         )
 
     # ---- Tail draws ----
-    tail_mask = is_tail == 1
-    n_tail = np.sum(tail_mask)
-    if n_tail > 0:
-        xi = params.get(
-            "gpd_xi", 0.0
-        )  # Tail draws use GPD → EVT modelling of extreme losses
-        if xi == 0:
-            excess = stats.expon.rvs(scale=params["gpd_beta"], size=n_tail)
+    tail_mask = is_tail
+    if tail_mask.any():
+        xi = params.get("gpd_xi", 0.0)
+        if abs(xi) < 1e-8:  # treat near-zero as exponential
+            excess = stats.expon.rvs(scale=params["gpd_beta"], size=tail_mask.sum())
         else:
             excess = stats.genpareto.rvs(
-                c=params["gpd_xi"], scale=params["gpd_beta"], size=n_tail
+                c=xi,
+                scale=params["gpd_beta"],
+                size=tail_mask.sum(),
             )
         sevs[tail_mask] = threshold + excess
 
