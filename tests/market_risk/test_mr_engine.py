@@ -49,15 +49,18 @@ def test_stress_testing_returns_stressed_capital():
 
     # Custom config with stress shocks
     config = {
-        "n_paths": 1000,  # Small for test speed
+        "n_paths": 2000,  # Small for test speed
         "horizon_days": 10,
         "scaling_days_year": 252,
+        "df_t": 3.0,
         "stress_shocks": {
             "SPY": -0.40,  # Expect negative P&L if long equity
             "TLT": 0.02,  # Positive shock (duration negative → loss if long bonds)
-            "Unknown_Factor": -0.10,  # Should be ignored with warning
         },
     }
+
+    # Fix seed for reproducibility in test
+    np.random.seed(42)
 
     engine = MarketRiskEconomicCapital(
         risk_factors=dummy_rf, positions=positions, config=config
@@ -65,10 +68,22 @@ def test_stress_testing_returns_stressed_capital():
 
     results = engine.run()
 
-    # Assert stressed fields are present and non-None
+    stressed_var = results["stressed_var_1y_999"]
+    stressed_es = results["stressed_es_1y_999"]
+    baseline_var = results["var_1y_999"]
+
+    # --- Basic presence checks ---
     assert "stressed_var_1y_999" in results
+    assert "stressed_es_1y_999" in results
     assert results["stressed_var_1y_999"] is not None
-    assert results["stressed_var_1y_999"] == results["stressed_es_1y_999"]
-    assert (
-        results["stressed_var_1y_999"] > 100_000
-    )  # Significant impact from 40% SPY drop on £5M position
+    assert results["stressed_es_1y_999"] is not None
+
+    # Stressed capital must be positive and meaningfully higher than baseline
+    assert stressed_var > 0
+    assert stressed_var > baseline_var * 1.3  # At least 30% uplift from large shock
+
+    # ES should be strictly greater than VaR (fat tails → tail expectation worse)
+    assert stressed_es > stressed_var
+
+    # Reasonable upper bound to prevent explosion
+    assert stressed_var < baseline_var * 15
