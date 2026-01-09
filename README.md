@@ -102,6 +102,7 @@ Each risk type can be executed and validated independently, with shared utilitie
 │   ├── aggregate.py                              # Portfolio-level aggregation across risk stripes
 │   ├── config_loader.py                          # Global + module-specific YAML config merging and defaults
 │   ├── firmwide_reporting.py                     # Regulatory-grade firm-wide Excel report generation
+│   ├── reporting_utils.py                        # Shared utilities for clean Excel chart styling and column autofitting
 │   ├── run_full_ec.py                            # Master orchestrator for full firm-wide Economic Capital simulation
 │   ├── utils.py                                  # Shared logging, profiling, and helpers
 │   └── __init__.py                               # Package init and high-level API (run_full_simulation, etc.)
@@ -123,6 +124,7 @@ Each risk type can be executed and validated independently, with shared utilitie
 │   ├── conftest.py                               # Shared pytest fixtures
 │   ├── test_aggregate.py                         # Tests diversification and aggregation logic
 │   ├── test_config_loader.py                     # Tests YAML config merging and defaults
+│   ├── test_reporting_utils.py                   # Unit tests for reporting_utils.py (chart styling, colors, labels, autofit)
 │   └── test_run_full_simulation.py               # Tests full firm-wide orchestration
 ├── .coveragerc                         # Coverage configuration (omits demos, raises, etc.)
 ├── .gitattributes                      # Line ending normalization (LF for code/YAML, binary for Excel)
@@ -171,6 +173,13 @@ MTM_t = w·ΔS/S₀ + 0.5·γ·(ΔS/S₀)² + add
 ### 📊 Outputs & Regulatory-Grade Reporting
 
 The framework generates professional **Excel reports** (via `openpyxl`) for each risk pillar and a consolidated firm-wide view. Reports include formatted tables, bar charts, styled headers, and multiple sheets for breakdowns.
+
+All chart-heavy reports use shared styling utilities located in `econ_capital/reporting_utils.py`.  
+This module provides:
+- Consistent clean bar chart styling (color palette, no legend, rotated labels, £M formatting, manual layout)
+- Automatic column autofitting with text wrapping and max-width capping
+
+This ensures a professional, uniform look across Market, Credit, OpRisk, and Firm-Wide reports.
 
 #### Market Risk Report
 - **File**: `Market_Risk_EC_Report_*.xlsx` (in `econ_capital/market_risk/reports/`)
@@ -237,6 +246,17 @@ with timed_section("Market Risk Simulation"):
     # Your long-running code here
     results = engine.run()
 ```
+  
+### 📊 Excel Reporting Helpers
+
+Shared utilities in econ_capital/reporting_utils.py provide:
+
+* Clean, consistent styling for bar charts (colors, layout, labels, rotation)
+* Automatic column width adjustment with text wrapping
+
+Used by all risk pillar reporting modules.
+
+---
 
 ## 🧪 Testing
 
