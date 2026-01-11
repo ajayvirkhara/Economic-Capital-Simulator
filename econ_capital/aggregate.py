@@ -22,61 +22,68 @@ def normalize_risk_results(
     op_results: Dict[str, Any],
 ) -> Dict[str, Dict[str, float]]:
     """
-    Normalize the three risk outputs into a common {risk_type: {"EL": ..., "UL": ...}} format.
+    Normalize the three risk outputs into a common format.
+    Prefers WWR-adjusted values when available.
     """
     confidence_level = 0.999
     z = norm.ppf(confidence_level)
 
-    # Validate all required keys
+    normalized = {}
 
-    # Market risk: prefer ES, fall back to VaR, default to 0
-    if "es_1y_999" not in market_results and "var_1y_999" not in market_results:
-        logger.warning("No market VaR or ES found; treating market risk as zero")
-
-    # Credit risk: default both to 0.0 if missing
-    if "EL_total" not in credit_results:
-        credit_results["EL_total"] = 0.0
-    if "UL_total" not in credit_results:
-        credit_results["UL_total"] = 0.0
-
-    # Op risk: require both capital_999 and expected_loss
-    required_op = ["capital_999", "expected_loss"]
-    for key in required_op:
-        if key not in op_results:
-            raise KeyError(f"Missing {key} in op_results")
-
-    if z <= 0:
-        raise ValueError("z must be positive for UL calculations")
-
-    # Market: Full measure = ES_1Y_999, EL ≈ 0, UL ≈ ES / z
+    # Market: prefer ES → VaR → 0
     market_full = market_results.get(
-        "es_1y_999", market_results.get("var_1y_999", 0.0)
-    )  # default to ES (conservative)
+        "es_1y_999", market_results.get("var_1y_999", market_results.get("UL", 0.0))
+    )
     market_el = 0.0
     market_ul = market_full / z if z > 0 else market_full
 
-    # Credit Risk
-    credit_el = credit_results.get("EL_total", 0.0)
-    credit_ul = credit_results.get("UL_total", 0.0)
+    normalized["Market"] = {
+        "EL": market_el,
+        "UL": market_ul,
+        "Total_Standalone": market_full,
+        "label": "Market Risk",
+    }
 
-    # OpRisk: Full capital is VaR-like → treat as UL; EL assumed embedded or zero
+    # Credit: prefer WWR-adjusted if present
+    credit = credit_results
+    if isinstance(credit, dict) and "credit_details" in credit:
+        credit = credit["credit_details"]
+
+    # Prefer WWR-adjusted if present
+    credit_el = credit.get(
+        "EL_WWR_total", credit.get("EL_total", credit.get("EL", 0.0))
+    )
+    credit_ul = credit.get(
+        "UL_WWR_total", credit.get("UL_total", credit.get("UL", 0.0))
+    )
+    credit_ec = credit_el + z * credit_ul
+
+    normalized["Credit"] = {
+        "EL": credit_el,
+        "UL": credit_ul,
+        "Total_Standalone": credit_ec,
+        "label": "Credit (WWR-adjusted)" if "EL_WWR_total" in credit else "Credit",
+    }
+
+    # OpRisk: capital_999 is full VaR-like → split into EL + UL
     oprisk_full = op_results.get("capital_999", 0.0)
     oprisk_el = op_results.get("expected_loss", 0.0)
     oprisk_ul = (oprisk_full - oprisk_el) / z if z > 0 else (oprisk_full - oprisk_el)
 
-    return {
-        "Market": {"EL": market_el, "UL": market_ul, "Total_Standalone": market_full},
-        "Credit": {
-            "EL": credit_el,
-            "UL": credit_ul,
-            "Total_Standalone": credit_el + (credit_ul * z),
-        },
-        "OpRisk": {"EL": oprisk_el, "UL": oprisk_ul, "Total_Standalone": oprisk_full},
+    normalized["OpRisk"] = {
+        "EL": oprisk_el,
+        "UL": oprisk_ul,
+        "Total_Standalone": oprisk_full,
+        "label": "Operational Risk",
     }
+
+    return normalized
 
 
 def aggregate_economic_capital(
-    risk_results: Dict[str, Dict[str, float]],
+    market_results: Dict[str, Any],
+    credit_results: Dict[str, Any],
+    op_results: Dict[str, Any],
     confidence_level: float = 0.999,
     copula_df: Optional[float] = None,  # If provided, use t-copula simulation
     n_sim: int = 200_000,
@@ -91,17 +98,23 @@ def aggregate_economic_capital(
     -------
     EL_total, UL_portfolio, EC_total, marginal_contributions, diversification_benefit
     """
-    risk_types = list(risk_results.keys())
-    n_risks = len(risk_types)  # Number of risk types (Market, Credit, OpRisk)
 
-    el_vec = np.array([risk_results[rt]["EL"] for rt in risk_types])
-    ul_vec = np.array([risk_results[rt]["UL"] for rt in risk_types])
+    # Step 1: Normalize the raw inputs
+    normalized = normalize_risk_results(
+        market_results=market_results,
+        credit_results=credit_results,
+        op_results=op_results,
+    )
+
+    # Step 2: Extract vectors from the normalized data
+    risk_types = list(normalized.keys())
+    el_vec = np.array([normalized[rt]["EL"] for rt in risk_types])
+    ul_vec = np.array([normalized[rt]["UL"] for rt in risk_types])
 
     EL_total = el_vec.sum()
 
-    # Fixed correlation matrix (Market-Credit-OpRisk order)
     corr_matrix = np.array([[1.0, 0.3, 0.1], [0.3, 1.0, 0.2], [0.1, 0.2, 1.0]])
-    # Reorder to match actual risk_types order
+
     order = ["Market", "Credit", "OpRisk"]
     idx = [order.index(rt) for rt in risk_types]
     corr_matrix = corr_matrix[np.ix_(idx, idx)]
@@ -110,7 +123,11 @@ def aggregate_economic_capital(
         # --- t-Copula Monte Carlo (fat-tailed joint simulation) ---
         rng = np.random.default_rng(seed)
         t_shocks = mv_t_draws(
-            n=n_sim, mu=np.zeros(n_risks), cov=corr_matrix, df=copula_df, rng=rng
+            n=n_sim,
+            mu=np.zeros(len(risk_types)),
+            cov=corr_matrix,
+            df=copula_df,
+            rng=rng,
         )
         # Scale shocks by individual ULs
         simulated_ul = t_shocks * ul_vec[None, :]
@@ -123,7 +140,7 @@ def aggregate_economic_capital(
 
         t_quantile = t.ppf(confidence_level, copula_df)
         standalone_ec = sum(
-            risk_results[rt]["EL"] + t_quantile * risk_results[rt]["UL"]
+            normalized[rt]["EL"] + t_quantile * normalized[rt]["UL"]
             for rt in risk_types
         )
         diversification_benefit = standalone_ec - EC_total
@@ -132,8 +149,8 @@ def aggregate_economic_capital(
         cutoff = np.quantile(total_losses, confidence_level)
         tail_mask = total_losses >= cutoff  # Upper tail for losses (positive capital)
 
-        tail_contrib = np.zeros(n_risks)
-        for i in range(n_risks):
+        tail_contrib = np.zeros(len(risk_types))
+        for i in range(len(risk_types)):
             # Individual contribution in tail: total tail loss minus others
             indiv_tail = (
                 total_losses[tail_mask]
@@ -154,21 +171,24 @@ def aggregate_economic_capital(
         z = norm.ppf(confidence_level)
         EC_total = EL_total + z * UL_portfolio
 
-        standalone_components = []
-        for i in range(n_risks):
-            val = el_vec[i] + (ul_vec[i] * z)
-            standalone_components.append(val)
-
-        standalone_ec = sum(standalone_components)
-
+        standalone_ec = sum(
+            normalized[rt]["EL"] + z * normalized[rt]["UL"] for rt in risk_types
+        )
         diversification_benefit = standalone_ec - EC_total
 
+        # Marginal: Euler allocation of UL part + pro-rata EL
         if UL_portfolio > 1e-8:
             marginal_ul = z * (corr_matrix @ ul_vec) * ul_vec / UL_portfolio
         else:
-            marginal_ul = np.zeros(n_risks)
+            marginal_ul = np.zeros(len(risk_types))
 
-        marginal = pd.Series(marginal_ul, index=risk_types, name="EC_Marginal")
-        marginal["Credit"] += el_vec[1]  # or identify by index/name
+        el_share = (
+            el_vec / EL_total
+            if EL_total > 0
+            else np.ones(len(risk_types)) / len(risk_types)
+        )
+        marginal_ec = marginal_ul + el_share * EL_total
+
+        marginal = pd.Series(marginal_ec, index=risk_types, name="EC_Marginal")
 
     return EL_total, UL_portfolio, EC_total, marginal, diversification_benefit
