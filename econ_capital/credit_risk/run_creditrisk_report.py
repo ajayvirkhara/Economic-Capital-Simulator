@@ -25,6 +25,8 @@ from econ_capital.credit_risk.csa import CSA
 from econ_capital.credit_risk.exposure_engine import ExposureEngine
 from econ_capital.credit_risk.creditrisk_reporting import generate_creditrisk_report
 from econ_capital.credit_risk.config import DEFAULT_CONFIG
+from econ_capital.credit_risk.wwr import adjust_for_wwr
+from econ_capital.credit_risk.market_model import simulate_credit_factors
 
 # Silence the noisy exposure engine logger
 lda_logger = logging.getLogger("econ_capital.credit_risk.exposure_engine")
@@ -160,6 +162,33 @@ def main():
 
     df_results = pd.DataFrame(results_list)
 
+    # ────────────────────────────────────────────────────────────────
+    # Apply Wrong-Way Risk
+    credit_factors = simulate_credit_factors(
+        n_paths=5000, n_steps=len(df_results), corr=0.25, seed=42 + 1
+    )
+
+    # Simple strong version
+    df_results["EL_WWR"] = adjust_for_wwr(
+        exposures=df_results["EL"].values,
+        credit_factors=credit_factors.mean(axis=0),
+        sensitivity=0.35,
+        apply_to_volatility=False,
+    )
+
+    df_results["UL_WWR"] = adjust_for_wwr(
+        exposures=df_results["UL"].values,
+        credit_factors=credit_factors.mean(axis=0),
+        sensitivity=0.35 * 3.0,  # stronger for UL/tail
+        apply_to_volatility=True,
+        min_factor=0.6,
+    )
+
+    print(
+        "WWR columns created:",
+        ["EL_WWR" in df_results.columns, "UL_WWR" in df_results.columns],
+    )
+
     # ------------------------------------------------------------------
     # 5. PORTFOLIO AGGREGATION (ECONOMIC CAPITAL)
     # ------------------------------------------------------------------
@@ -170,12 +199,13 @@ def main():
     # Portfolio Unexpected Loss (diversified)
     ul_vec = df_results["UL"].values
     portfolio_var = ul_vec @ corr_matrix @ ul_vec
-    UL_total = np.sqrt(max(portfolio_var, 0.0))
+    diversified_ul = np.sqrt(max(portfolio_var, 0.0))
 
     # Portfolio totals
     EL_total = df_results["EL"].sum()
+    UL_total = ul_vec.sum()
     z = norm.ppf(config.get("confidence_level", 0.999))
-    EC_total = EL_total + z * UL_total
+    EC_total = EL_total + z * diversified_ul
 
     # Marginal EC: Euler allocation on UL part + pro-rata EL
     if UL_total > 1e-8:
@@ -188,6 +218,10 @@ def main():
     # Sort by Capital impact for the report
     df_results = df_results.sort_values("EC_Marginal", ascending=False)
 
+    EL_wwr_total = df_results["EL_WWR"].sum()
+    UL_wwr_total = df_results["UL_WWR"].sum()
+    EC_wwr_total = EL_wwr_total + norm.ppf(0.999) * UL_wwr_total * 0.7
+
     # ------------------------------------------------------------------
     # 6. GENERATE REPORT
     # ------------------------------------------------------------------
@@ -195,6 +229,9 @@ def main():
         "EL_total": EL_total,
         "UL_total": UL_total,
         "EC_total": EC_total,
+        "EC_WWR": EC_wwr_total,
+        "EL_WWR": EL_wwr_total,
+        "UL_WWR": UL_wwr_total,
         "capital_breakdown": df_results.set_index("name")["EC_Marginal"],
         "full_data": df_results,
     }

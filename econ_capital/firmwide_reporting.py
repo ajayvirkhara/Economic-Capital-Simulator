@@ -137,6 +137,12 @@ class FirmWideECReporter:
             ws[f"A{i}"].font = Font(bold=True)
             if label != "Run Timestamp":
                 ws[f"B{i}"].number_format = '"£"#,##0'
+        ws.append(
+            [
+                "Note",
+                "Marginal contributions are post-diversification and do not sum exactly to total EC",
+            ]
+        )
         autofit_columns(ws)
 
     def _create_risk_contributions_sheet(self, wb: Workbook):
@@ -317,6 +323,18 @@ class FirmWideECReporter:
                 name="TableStyleMedium2", showRowStripes=True
             )
             ws.add_table(tab)
+        note_row = ws.max_row + 2  # 2 rows below the last data row
+        ws.cell(row=note_row, column=1).value = (
+            "Note: Sum of detailed market positions is standalone (pre-diversification). "
+            "Marginal contribution reflects post-diversification effect in the firm-wide portfolio."
+        )
+        ws.cell(row=note_row, column=1).font = Font(italic=True, color="555555")
+        ws.merge_cells(
+            start_row=note_row,
+            start_column=1,
+            end_row=note_row,
+            end_column=ws.max_column,
+        )
         autofit_columns(ws)
 
     def _create_detailed_credit_sheet(self, wb: Workbook):
