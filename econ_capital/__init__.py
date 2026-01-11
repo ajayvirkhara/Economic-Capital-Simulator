@@ -103,7 +103,11 @@ def run_full_simulation(
 
     # 3. Aggregate with diversification
     EL_total, UL_portfolio, EC_total, marginal, div_benefit = (
-        aggregate_economic_capital(risk_results=normalized)
+        aggregate_economic_capital(
+            market_results=market_results,
+            credit_results=credit_results,
+            op_results=op_results,
+        )
     )
 
     if verbose:

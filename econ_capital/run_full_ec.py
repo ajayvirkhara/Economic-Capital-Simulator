@@ -46,10 +46,14 @@ def main():
         "es_1y_999": full_market_results.get("es_1y_999", 0.0),
     }
 
-    credit_results = {
-        "EL_total": full_credit_results.get("EL_total", 0.0),
-        "UL_total": full_credit_results.get("UL_total", 0.0),
-    }
+    # Extract both base and WWR (fallback to base if missing)
+    credit_base_ec = full_credit_results.get("EC_total", 0.0)
+    credit_wwr_ec = full_credit_results.get("EC_WWR_total", credit_base_ec)
+
+    print(f"Credit EC (base):     £{credit_base_ec:,.0f}")
+    if credit_wwr_ec != credit_base_ec:
+        print(f"Credit EC (WWR):      £{credit_wwr_ec:,.0f}")
+        print(f"WWR impact:           {credit_wwr_ec / credit_base_ec - 1:+.1%}")
 
     oprisk_baseline_metrics = full_op_results.get("baseline_metrics", {})
     oprisk_var_999 = oprisk_baseline_metrics.get("capital_999", 0.0)
@@ -62,7 +66,7 @@ def main():
     # 2. Normalize to common format
     normalized = normalize_risk_results(
         market_results=market_results,
-        credit_results=credit_results,
+        credit_results=full_credit_results,
         op_results=op_results,
     )
 
@@ -73,7 +77,9 @@ def main():
     # 3. Aggregate with diversification
     EL_total, UL_portfolio, EC_total, marginal, div_benefit = (
         aggregate_economic_capital(
-            risk_results=normalized,
+            market_results=market_results,
+            credit_results=full_credit_results,
+            op_results=op_results,
             confidence_level=0.999,
             copula_df=7.0,
         )
