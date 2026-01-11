@@ -37,3 +37,14 @@ repos:
           - pandas-datareader
           - tqdm
           - setuptools
+
+  # Nbstriput - strip Notebook outputs
+  -   repo: https://github.com/kynan/nbstripout
+      rev: 0.8.0
+      hooks:
+      -   id: nbstripout
+          name: Strip notebook outputs
+          description: Clear outputs from Jupyter notebooks before commit
+          entry: nbstripout
+          language: python
+          types: [jupyter]
