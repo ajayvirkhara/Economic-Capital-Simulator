@@ -8,7 +8,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from typing import Dict, Any, Tuple, Optional
-from scipy.stats import norm
+from scipy.stats import norm, t
 
 from econ_capital.utils import setup_logging
 from econ_capital.market_risk.shocks import mv_t_draws
@@ -26,7 +26,7 @@ def normalize_risk_results(
     Prefers WWR-adjusted values when available.
     """
     confidence_level = 0.999
-    z = norm.ppf(confidence_level)
+    z = t.ppf(confidence_level, 3)
 
     normalized = {}
 
@@ -86,7 +86,7 @@ def aggregate_economic_capital(
     op_results: Dict[str, Any],
     confidence_level: float = 0.999,
     copula_df: Optional[float] = None,  # If provided, use t-copula simulation
-    n_sim: int = 200_000,
+    n_sim: int = 500_000,
     seed: int = 42,
 ) -> Tuple[float, float, float, pd.Series, float]:
     """
@@ -148,20 +148,33 @@ def aggregate_economic_capital(
         # Marginal via simulation: average contribution in tail scenarios
         cutoff = np.quantile(total_losses, confidence_level)
         tail_mask = total_losses >= cutoff  # Upper tail for losses (positive capital)
+        n_tail = tail_mask.sum()
 
-        tail_contrib = np.zeros(len(risk_types))
-        for i in range(len(risk_types)):
-            # Individual contribution in tail: total tail loss minus others
-            indiv_tail = (
-                total_losses[tail_mask]
-                - (EL_total - el_vec[i])
-                - simulated_ul[tail_mask].sum(axis=1)
-                + simulated_ul[tail_mask, i]
+        if n_tail < 200:
+            logger.warning(
+                f"Only {n_tail} tail scenarios - results unstable. Increase n_sim."
             )
-            tail_contrib[i] = indiv_tail.mean()
 
-        marginal = pd.Series(tail_contrib, index=risk_types, name="EC_Marginal")
-        UL_portfolio = np.std(simulated_ul.sum(axis=1))
+        # Conditional expectation in tail for each risk
+        tail_contrib = np.mean(simulated_ul[tail_mask, :], axis=0)  # shape (3,)
+
+        # Allocate the unexpected part proportionally
+        unexpected_portfolio = EC_total - EL_total
+        if tail_contrib.sum() > 1e-6:
+            marginal_ul = tail_contrib / tail_contrib.sum() * unexpected_portfolio
+        else:
+            marginal_ul = np.zeros(len(risk_types))
+
+        # Add pro-rata EL in tail probability
+        el_share = (
+            el_vec / EL_total
+            if EL_total > 0
+            else np.ones(len(risk_types)) / len(risk_types)
+        )
+        marginal_ec = el_share * EL_total + marginal_ul
+
+        marginal = pd.Series(marginal_ec, index=risk_types, name="EC_Marginal")
+        UL_portfolio = float(np.std(simulated_ul.sum(axis=1)))
 
     else:
         # --- Gaussian Analytic Method ---
