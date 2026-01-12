@@ -22,7 +22,7 @@ EC = Φ⁻¹(α) × sqrt(Var(L))
 from __future__ import annotations
 import numpy as np
 import pandas as pd
-from scipy.stats import norm
+from scipy.stats import t
 
 from econ_capital.credit_risk.allocation import allocate_ec
 from econ_capital.utils import setup_logging, validate_shape, timed_section
@@ -89,7 +89,7 @@ def aggregate_credit_losses(
         var_portfolio = np.dot(ul, np.dot(corr, ul))
         ul_total = np.sqrt(var_portfolio)
         el_total = el.sum()
-        z = norm.ppf(confidence)
+        z = t.ppf(confidence, 3)
         ec_total = el_total + z * ul_total
         alloc = ec_total * (el / el.sum())
 

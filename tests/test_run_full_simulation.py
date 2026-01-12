@@ -10,7 +10,7 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 import pytest
-from scipy.stats import norm
+from scipy.stats import t
 
 from econ_capital import run_full_simulation
 
@@ -47,7 +47,7 @@ def test_run_full_simulation_happy_path(fixed_time):
 
     EL_total = 80_000_000.0
     UL_portfolio = 250_000_000.0
-    z = norm.ppf(0.999)
+    z = t.ppf(0.999, 3)
     EC_total = EL_total + z * UL_portfolio
     diversification_benefit = 150_000_000.0
     marginal_series = pd.Series(

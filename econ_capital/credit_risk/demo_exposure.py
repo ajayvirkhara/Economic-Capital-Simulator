@@ -7,7 +7,7 @@ Run with:
 
 import numpy as np
 import pandas as pd
-from scipy.stats import norm
+from scipy.stats import t
 
 from econ_capital.utils import setup_logging, timed_section
 from econ_capital.credit_risk import (
@@ -100,7 +100,7 @@ def main():
     portfolio_losses = el_paths.sum(axis=1) + 3.09 * ul_paths.sum(axis=1) * 0.7
     EC_wwr_pathwise = np.quantile(portfolio_losses, 0.999)
 
-    base_ec = risk_df["EL"].sum() + norm.ppf(0.999) * risk_df["UL"].sum() * 0.7
+    base_ec = risk_df["EL"].sum() + t.ppf(0.999, 3) * risk_df["UL"].sum() * 0.7
 
     print(f"\nBase EC (no WWR):     £{base_ec:,.0f}")
     print(f"WWR-adjusted EC:      £{EC_wwr_pathwise:,.0f}")

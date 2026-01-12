@@ -6,14 +6,14 @@ Covers both normalize_risk_results() and aggregate_economic_capital()
 import numpy as np
 import pandas as pd
 import pytest
-from scipy.stats import norm
+from scipy.stats import t
 
 from econ_capital.aggregate import (
     normalize_risk_results,
     aggregate_economic_capital,
 )
 
-Z_999 = norm.ppf(0.999)
+Z_999 = t.ppf(0.999, 3)
 
 # ===================================================================
 # Tests for normalize_risk_results

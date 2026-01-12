@@ -12,7 +12,7 @@ from pathlib import Path
 import yaml
 import numpy as np
 import pandas as pd
-from scipy.stats import norm
+from scipy.stats import t
 import logging
 
 # Internal package imports
@@ -204,7 +204,7 @@ def main():
     # Portfolio totals
     EL_total = df_results["EL"].sum()
     UL_total = ul_vec.sum()
-    z = norm.ppf(config.get("confidence_level", 0.999))
+    z = t.ppf(config.get("confidence_level", 0.999), 3)
     EC_total = EL_total + z * diversified_ul
 
     # Marginal EC: Euler allocation on UL part + pro-rata EL
@@ -220,7 +220,7 @@ def main():
 
     EL_wwr_total = df_results["EL_WWR"].sum()
     UL_wwr_total = df_results["UL_WWR"].sum()
-    EC_wwr_total = EL_wwr_total + norm.ppf(0.999) * UL_wwr_total * 0.7
+    EC_wwr_total = EL_wwr_total + t.ppf(0.999, 3) * UL_wwr_total * 0.7
 
     # ------------------------------------------------------------------
     # 6. GENERATE REPORT
@@ -235,6 +235,20 @@ def main():
         "capital_breakdown": df_results.set_index("name")["EC_Marginal"],
         "full_data": df_results,
     }
+
+    # ── Make per-counterparty EC_Marginal sum to standalone Credit EC ─────────────── #
+    standalone_credit_ec = report_data.get("standalone_credit_ec", EC_total)
+    if "full_data" in report_data:
+        df = report_data["full_data"]
+        current_sum = df["EC_Marginal"].sum()
+        if current_sum != 0 and abs(current_sum - standalone_credit_ec) > 1e5:
+            scale = standalone_credit_ec / current_sum
+            df["EC_Marginal"] *= scale
+            report_data["full_data"] = df
+            print(
+                f"Scaled Credit EC_Marginal to sum to standalone £{standalone_credit_ec:,.0f} "
+                f"(factor: {scale:.3f})"
+            )
 
     output_path = generate_creditrisk_report(
         config=config, engine=None, results=report_data, output_dir=str(REPORTS_DIR)
