@@ -120,7 +120,7 @@ class MarketRiskReporter:
 
     def _create_waterfall_sheet(self, wb: Workbook):
         ws = wb.create_sheet("Waterfall", 3)
-        ws["A1"] = "Capital Uplift Waterfall"
+        ws["A1"] = "Marginal Capital Contributions (Post-Diversification)"
         ws["A1"].font = Font(size=16, bold=True, color=self.colors["header"])
 
         # Prepare Data with Headers
@@ -178,6 +178,13 @@ class MarketRiskReporter:
         )
 
         ws.add_chart(chart, "D2")
+        current_row += 2
+        ws.cell(
+            current_row,
+            1,
+            "Note: Individual contributions have been scaled to align with the diversified 1Y Expected Loss.",
+        )
+        ws.cell(current_row, 1).font = Font(italic=True)
 
         autofit_columns(ws)
 

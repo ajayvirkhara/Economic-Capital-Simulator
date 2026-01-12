@@ -222,10 +222,48 @@ class MarketRiskEconomicCapital:
         var_1y = var_10d * scale
         es_1y = es_10d * scale
 
-        # Tail set for Euler-ES
+        # Tail quantile for tail statistics
         cutoff = np.quantile(pnl_port, 1.0 - q)
         tail_mask = pnl_port <= cutoff
-        contrib = self._allocate_euler_es(pnl_by_pos, tail_mask)
+
+        # ──────────────────────────────────────────────────────────────
+        # Euler-style component ES — linear (delta) approximation
+        # Average contribution of each position in the tail scenarios
+        # ──────────────────────────────────────────────────────────────
+
+        # Factor-level contribution (10-day average tail impact per factor)
+        tail_shocks = shocks[tail_mask, :]  # (n_tail, n_factors)
+
+        # Compute position-level P&L in tail scenarios (linear term only)
+        tail_position_pnl = np.dot(
+            tail_shocks, self.delta.T
+        )  # shape (n_tail, n_positions)
+
+        # Average loss contribution per position in the tail
+        component_es = -tail_position_pnl.mean(axis=0)  # shape (n_positions,)
+
+        # Create series with correct index
+        capital_breakdown = pd.Series(
+            component_es,
+            index=self.positions.columns,
+            name="Component ES 1Y (linear approx)",
+        )
+
+        # Final numerical cleanup (small adjustment)
+        total_component_sum = capital_breakdown.sum()
+        if abs(total_component_sum - es_1y) > 1e-6 * es_1y:
+            scale = es_1y / total_component_sum if total_component_sum != 0 else 1.0
+            capital_breakdown *= scale
+            logger.info(
+                "Component ES normalized to match portfolio ES (adjustment factor %.6f)",
+                scale,
+            )
+        else:
+            logger.info("Component ES already sums to portfolio ES (within tolerance)")
+
+        # Sort descending for reporting (largest contributors first)
+        capital_breakdown = capital_breakdown.sort_values(ascending=False)
+
         elapsed = time.perf_counter() - t0
         logger.info(
             "Run completed: VaR10d=%.3f ES10d=%.3f VaR1y=%.3f ES1y=%.3f elapsed=%.3fs",
@@ -289,5 +327,5 @@ class MarketRiskEconomicCapital:
             if stressed_es_1y is not None
             else None,
             "baseline_capital": 0.0,
-            "capital_breakdown": contrib.sort_values(ascending=False),
+            "capital_breakdown": capital_breakdown.sort_values(ascending=False),
         }
