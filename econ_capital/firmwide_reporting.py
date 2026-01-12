@@ -581,7 +581,9 @@ class FirmWideECReporter:
         # Write data rows
         for i, level in enumerate(levels, 4):
             _, _, EC_total, _, _ = aggregate_economic_capital(
-                self.results["individual_risks"],
+                market_results=self.results["individual_risks"].get("Market", {}),
+                credit_results=self.results["individual_risks"].get("Credit", {}),
+                op_results=self.results["individual_risks"].get("OpRisk", {}),
                 confidence_level=level,
                 copula_df=7.0,
             )
