@@ -125,10 +125,11 @@ def deterministic_shock(
 
 def generate_multiplicative_scenarios(
     base_profile: Dict[str, Dict[str, float]],
-    n: int = 10,
-    freq_scale: Tuple[float, float] = (0.5, 2.0),
-    sev_mu_scale: Tuple[float, float] = (0.0, 1.0),
-    sev_scale_multiplier: Tuple[float, float] = (0.5, 2.0),
+    n: int = 20,
+    freq_scale: Tuple[float, float] = (1.2, 3.0),
+    sev_mu_scale: Tuple[float, float] = (0.5, 2.0),
+    sev_scale_multiplier: Tuple[float, float] = (1.1, 2.5),
+    adverse: bool = False,
     seed: Optional[int] = None,
 ) -> List[Scenario]:
     """
@@ -138,6 +139,14 @@ def generate_multiplicative_scenarios(
     - sev_scale_multiplier: (min, max) multiplier range for severity scale/beta
     """
     rng = _rng(seed)
+    if adverse:
+        freq_scale = (1.5, 4.0)  # Stronger for adverse
+        sev_mu_scale = (0.8, 3.0)
+        sev_scale_multiplier = (1.5, 3.5)
+    else:
+        freq_scale = (1.2, 3.0)  # Milder base
+        sev_mu_scale = (0.5, 2.0)
+        sev_scale_multiplier = (1.2, 2.5)
     uoms = list(base_profile.keys())
     scenarios: List[Scenario] = []
     for k in range(n):
@@ -168,22 +177,71 @@ def build_scenario_set_from_data(
     sev_data_path: str,
     n_random: int = 10,
     seed: Optional[int] = None,
+    config_dict: Optional[Dict[str, Any]] = None,
 ) -> ScenarioSet:
     """
     High level helper that:
     - loads frequency & severity data using existing loaders
     - builds base profile
-    - creates a deterministic severe scenario + n_random stochastic scenarios
+    - incorporates user-defined scenarios from YAML config
+    - adds stochastic and other pre-defined scenarios
     """
     freq_df = load_frequency_data(freq_data_path)
     sev_df = load_severity_data(sev_data_path)
     uoms = discover_uoms(freq_df, sev_df)
     base = build_base_profile(freq_df, sev_df, uoms=uoms)
     scenarios: List[Scenario] = []
+
+    # Load scenarios from the YAML 'stress_tests' section
+    if config_dict and "stress_tests" in config_dict:
+        yaml_tests = config_dict["stress_tests"]
+        for s_name, s_params in yaml_tests.items():
+            # Get multipliers, default to 1.0 (no change) if missing
+            f_mult = float(s_params.get("frequency_multiplier", 1.0))
+            s_mult = float(s_params.get("severity_multiplier", 1.0))
+            
+            # Create UoM-mapped dictionaries for the Scenario object
+            scenarios.append(Scenario(
+                name=s_name,
+                freq_multiplier={uom: f_mult for uom in uoms},
+                sev_mu_shift={uom: float(np.log(s_mult)) for uom in uoms},
+                sev_scale_multiplier={u: min(s_mult ** 0.6, 5.0) for u in uoms},
+                note=f"YAML-driven scenario: {s_name} (mean ×{s_mult:.1f}, dispersion × min({s_mult:.1f})*0.6, 5)",
+            ))
+
+    # ────────────────────────────────────────────────
+    # Deterministic / named shock scenarios
+    # ────────────────────────────────────────────────
     scenarios.append(
         deterministic_shock(base, freq_pct=1.0, sev_pct=1.0, name="2x Uniform Shock")
     )
-    scenarios.extend(generate_multiplicative_scenarios(base, n=n_random, seed=seed))
+    scenarios.append(
+        deterministic_shock(base, freq_pct=0.2, sev_pct=1.2, name="Severe Cyber Attack")
+    )
+    scenarios.append(
+        deterministic_shock(base, freq_pct=0.01, sev_pct=1.3, name="Pandemic")
+    )
+
+    # ────────────────────────────────────────────────
+    # Stochastic (Monte Carlo style) scenarios
+    # ────────────────────────────────────────────────
+    if n_random > 0:
+
+        # Normal / benign-ish direction
+        scenarios.extend(
+            generate_multiplicative_scenarios(base, n=n_random, seed=seed, adverse=False)
+        )
+
+        # Optional adverse scenarios
+        # scenarios.extend(
+        #    generate_multiplicative_scenarios(
+        #        base,
+        #        n=n_random // 2,
+        #        seed=(seed + 1 if seed is not None else None),
+        #        adverse=True,
+        #    )
+        #)
+        
     return ScenarioSet(base_profile=base, scenarios=scenarios)
 
 

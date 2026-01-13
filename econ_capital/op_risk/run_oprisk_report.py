@@ -10,7 +10,6 @@ import sys
 
 import numpy as np
 import yaml
-import time
 import logging
 
 from econ_capital.op_risk.scenarios import (
@@ -31,7 +30,6 @@ def main() -> float:
     # ──────────────────────────────────────────────────────────────
     # PATH & DEBUG SETUP
     # ──────────────────────────────────────────────────────────────
-    start = time.perf_counter()
 
     print("\nSTARTING OPRISK REPORT GENERATION")
     print(f"Python: {sys.version}")
@@ -114,7 +112,6 @@ def main() -> float:
     data_set = build_scenario_set_from_data(
         freq_data_path=config["frequency"]["data_path"],
         sev_data_path=config["severity"]["data_path"],
-        n_random=10,
         seed=42,
     )
 
@@ -128,17 +125,25 @@ def main() -> float:
     yaml_scenarios = config.get("stress_tests", {})
     uom_keys = list(data_set.base_profile.keys())  # e.g. ["UoM1", "UoM2"]
 
+
+
     for name, sdef in yaml_scenarios.items():
-        freq_mult = float(sdef.get("frequency_multiplier", 1.0))
-        sev_mult = float(sdef.get("severity_multiplier", 1.0))
+        freq_mult = float(sdef.get("frequency_multiplier", 2.0))
+        sev_mult = float(sdef.get("severity_multiplier", 3.0))
+
+        # Safety caps to prevent numerical explosion
+        freq_mult = min(freq_mult, 10.0)
+        sev_mult = min(sev_mult, 10.0)
+
+        dispersion_mult = min(sev_mult ** 0.6, 6.0)   # cap at 6× to avoid NaN/infs
 
         data_set.scenarios.append(
             Scenario(
                 name=name,
                 freq_multiplier={u: freq_mult for u in uom_keys},
                 sev_mu_shift={u: np.log(sev_mult) for u in uom_keys},
-                sev_scale_multiplier={u: 1.0 for u in uom_keys},
-                note=f"YAML-driven scenario: {name}",
+                sev_scale_multiplier={u: dispersion_mult for u in uom_keys},
+                note=f"YAML: {name} — freq×{freq_mult:.1f}, sev mean×{sev_mult:.1f}, sev disp×{dispersion_mult:.1f}",
             )
         )
 
@@ -193,8 +198,10 @@ def main() -> float:
         "baseline_metrics": baseline_metrics,
         "expected_loss": baseline_metrics.get("expected_loss", 0.0),
     }
-    runtime = time.perf_counter() - start
+
     # ── Make stressed capitals sum to standalone OpRisk EC ────────────────────────── #
+
+    config["baseline_metrics"] = baseline_metrics
 
     standalone_oprisk_ec = results_dict.get(
         "standalone_oprisk_ec", total_oprisk_capital
@@ -203,22 +210,23 @@ def main() -> float:
         current_sum = sum(r.capital_stressed for r in results)
         if current_sum != 0 and abs(current_sum - standalone_oprisk_ec) > 1e5:
             scale = standalone_oprisk_ec / current_sum
-            # Create new list with scaled instances (immutable → new objects)
-            cap_stressed = r.capital_stressed * scale
-            cap_base = r.capital_base
             scaled_results = []
             for r in results:
+                cap_stressed = r.capital_stressed * scale
+                cap_base = r.capital_base
                 new_result = StressTestResult(
                     name=r.name,
                     description=r.description,
                     capital_base=cap_base,
                     capital_stressed=cap_stressed,
                     absolute_uplift=cap_stressed - cap_base,
-                    uplift_factor=r.uplift_factor * scale,
+                    uplift_factor=r.uplift_factor * scale
+                    if r.uplift_factor is not np.nan
+                    else np.nan,
                     uplift_pct=(cap_stressed - cap_base) / cap_base
                     if cap_base > 0
                     else np.nan,
-                    runtime_sec=runtime,
+                    runtime_sec=r.runtime_sec,
                 )
                 scaled_results.append(new_result)
             results = scaled_results  # replace original list
