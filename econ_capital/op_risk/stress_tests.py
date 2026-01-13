@@ -55,6 +55,8 @@ def _run_single_scenario(
     config["uom_overrides"]["sev_mu_shift"] = scenario.sev_mu_shift
     config["uom_overrides"]["sev_scale_multiplier"] = scenario.sev_scale_multiplier
 
+    logger.debug(f"Applied overrides for {scenario.name}: {config['uom_overrides']}")
+
     result = lda_run_engine(config)
     runtime = time.perf_counter() - start
 
