@@ -99,6 +99,20 @@ class OpRiskReporter:
         data = [
             ("Run Date", datetime.now().strftime("%Y-%m-%d %H:%M")),
             ("Baseline Capital (99.9% VaR)", f"£{self.tester.baseline_capital:,.0f}"),
+            (
+                "Expected Loss (EL)",
+                f"£{self.config.get('baseline_metrics', {}).get('expected_loss', 0):,.0f}",
+            ),
+            (
+                "Unexpected Loss (UL)",
+                f"£{self.tester.baseline_capital - self.config.get('baseline_metrics', {}).get('expected_loss', 0):,.0f}",
+            ),
+            (
+                "EL/EC Ratio",
+                f"{(self.config.get('baseline_metrics', {}).get('expected_loss', 0) / self.tester.baseline_capital):.1%}"
+                if self.tester.baseline_capital > 0
+                else "N/A",
+            ),
             ("Number of Scenarios", len(self.results)),
             ("Worst-Case Uplift", f"{self.results[0].uplift_factor:.2f}x"),
             ("Worst-Case Scenario", self.results[0].name),
