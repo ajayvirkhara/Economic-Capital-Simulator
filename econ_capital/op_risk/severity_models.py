@@ -53,6 +53,9 @@ def fit_lognormal_gpd(
     if len(body_losses) > 0:
         log_body = np.log(body_losses)
         lognormal_mu = np.mean(log_body)
+        lognormal_mu = min(
+            lognormal_mu, np.log(1_000_000)
+        )  # Cap at log(1M) to limit mean severity ~£1M
         lognormal_sigma = np.std(log_body, ddof=1)
     else:
         lognormal_mu, lognormal_sigma = np.log(np.median(losses)), 0.5
@@ -72,7 +75,7 @@ def fit_lognormal_gpd(
         res = minimize(
             neg_log_lik,
             x0=[0.1, np.std(tail_losses)],
-            bounds=[(-0.25, 0.5), (1e-6, None)],
+            bounds=[(-0.25, 0.35), (1e-6, None)],
             method="L-BFGS-B",
         )
         if not res.success:
@@ -80,7 +83,7 @@ def fit_lognormal_gpd(
         else:
             gpd_xi, gpd_beta = res.x
     else:
-        gpd_xi, gpd_beta = 0.0, threshold * 0.1
+        gpd_xi, gpd_beta = 0.1, max(threshold * 0.1, 10000.0)
 
     tail_prob = len(tail_losses) / len(losses)  # likelihood of loss exceeding threshold
 

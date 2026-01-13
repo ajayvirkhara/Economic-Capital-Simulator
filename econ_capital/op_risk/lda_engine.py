@@ -136,7 +136,7 @@ def prepare_models(config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
                     mean_loss = np.mean(uom_sev) if len(uom_sev) > 0 else 10000.0
                     sev_params = {
                         "lognormal_mu": np.log(mean_loss),
-                        "lognormal_sigma": 1.5,
+                        "lognormal_sigma": max(1.0, 1.5),
                         "gpd_xi": 0.0,
                         "gpd_beta": mean_loss,
                         "threshold": threshold_default,
@@ -322,26 +322,52 @@ def run_monte_carlo_simulation(
             base_lambda = freq_params["lambda"]
             stressed_lambda = base_lambda * uom_freq_mult
 
+            stressed_lambda = max(stressed_lambda, 0.1)
+
             # Severity stress: Create a DEEP COPY of the fitted parameters
             # and apply the stress to the copy.
             stressed_sev_params = sev_params.copy()
 
-            # Ensure we are working with the correct base mu/sigma
-            # using either fitted or hardcoded values
-            if not config["severity"].get("use_fitted", True):
-                mu = config["severity"]["mu"]
-                sigma = config["severity"]["sigma"]
-            else:
+            # Decide whether to use fitted parameters or hardcoded values from config
+            use_fitted = config.get("severity", {}).get("use_fitted", True)
+
+            if use_fitted:
+                # Use values fitted from historical data
                 mu = stressed_sev_params["lognormal_mu"]
                 sigma = stressed_sev_params["lognormal_sigma"]
+                logger.debug(f"UoM {uom}: Using fitted severity params (mu={mu:.3f}, sigma={sigma:.3f})")
+            else:
+                # Use hardcoded values directly from YAML config
+                mu = config.get("severity", {}).get("mu", np.log(10000))  # fallback ~£10k median
+                sigma = config.get("severity", {}).get("sigma", 1.5)      # fallback realistic value
+                logger.info(f"UoM {uom}: Using HARDCODED severity params from config (mu={mu:.3f}, sigma={sigma:.3f})")
 
-            # Apply UoM-specific severity stress
-            stressed_mu = mu + uom_mu_shift
-            stressed_sigma = sigma * uom_scale_mult
+            # Stressed mu
+            effective_mu_shift = (
+                uom_mu_shift
+                if uom_mu_shift != 0
+                else config["severity"].get("mu_shift", 0.0)
+            )
+            stressed_mu = mu + np.log(1.0 + effective_mu_shift)
+
+            # Stressed sigma
+            effective_scale_mult = (
+                uom_scale_mult
+                if uom_scale_mult != 1.0
+                else config["severity"].get("scale_multiplier", 1.0)
+            )
+            stressed_sigma = sigma * effective_scale_mult
 
             # Minimum constraints
-            stressed_mu = max(stressed_mu, 8.0)
-            stressed_sigma = max(stressed_sigma, 1.0)
+            stressed_mu = max(stressed_mu, 5.0)
+            stressed_sigma = max(stressed_sigma, 0.8)
+
+            logger.debug(
+                f"UoM {uom}: base_lambda={base_lambda:.2f}, stressed_lambda={stressed_lambda:.2f}"
+            )
+            logger.debug(
+                f"UoM {uom}: base_mu={mu:.2f}, stressed_mu={stressed_mu:.2f}, stressed_sigma={stressed_sigma:.2f}"
+            )
 
             # Update the temporary dictionary with STRESSED parameters
             stressed_sev_params["lognormal_mu"] = stressed_mu
@@ -363,7 +389,7 @@ def run_monte_carlo_simulation(
                 params=stressed_sev_params,
                 rng=rng,
             )
-            batch_severities = np.maximum(batch_severities, 5_000)  # no zero losses
+            batch_severities = np.maximum(batch_severities, 0.01)  # no zero losses
 
             # Step 5d: Aggregate per-path losses
             path_losses = np.zeros(num_simulations)
