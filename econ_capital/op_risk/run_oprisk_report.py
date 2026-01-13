@@ -10,6 +10,7 @@ import sys
 
 import numpy as np
 import yaml
+import time
 import logging
 
 from econ_capital.op_risk.scenarios import (
@@ -17,7 +18,7 @@ from econ_capital.op_risk.scenarios import (
     build_scenario_set_from_data,
 )
 from econ_capital.op_risk.oprisk_reporting import generate_oprisk_report
-from econ_capital.op_risk.stress_tests import OpRiskStressTester
+from econ_capital.op_risk.stress_tests import OpRiskStressTester, StressTestResult
 from econ_capital.op_risk.lda_engine import lda_run_engine
 
 # Silence the noisy LDA engine logger
@@ -30,6 +31,7 @@ def main() -> float:
     # ──────────────────────────────────────────────────────────────
     # PATH & DEBUG SETUP
     # ──────────────────────────────────────────────────────────────
+    start = time.perf_counter()
 
     print("\nSTARTING OPRISK REPORT GENERATION")
     print(f"Python: {sys.version}")
@@ -191,8 +193,41 @@ def main() -> float:
         "baseline_metrics": baseline_metrics,
         "expected_loss": baseline_metrics.get("expected_loss", 0.0),
     }
+    runtime = time.perf_counter() - start
+    # ── Make stressed capitals sum to standalone OpRisk EC ────────────────────────── #
 
-    # Generate the actual Excel report
+    standalone_oprisk_ec = results_dict.get(
+        "standalone_oprisk_ec", total_oprisk_capital
+    )
+    if results:
+        current_sum = sum(r.capital_stressed for r in results)
+        if current_sum != 0 and abs(current_sum - standalone_oprisk_ec) > 1e5:
+            scale = standalone_oprisk_ec / current_sum
+            # Create new list with scaled instances (immutable → new objects)
+            cap_stressed = r.capital_stressed * scale
+            cap_base = r.capital_base
+            scaled_results = []
+            for r in results:
+                new_result = StressTestResult(
+                    name=r.name,
+                    description=r.description,
+                    capital_base=cap_base,
+                    capital_stressed=cap_stressed,
+                    absolute_uplift=cap_stressed - cap_base,
+                    uplift_factor=r.uplift_factor * scale,
+                    uplift_pct=(cap_stressed - cap_base) / cap_base
+                    if cap_base > 0
+                    else np.nan,
+                    runtime_sec=runtime,
+                )
+                scaled_results.append(new_result)
+            results = scaled_results  # replace original list
+            print(
+                f"Scaled OpRisk stressed capitals to sum to standalone £{standalone_oprisk_ec:,.0f} "
+                f"(factor: {scale:.3f})"
+            )
+
+    # Generate Excel report
     generate_oprisk_report(
         tester=tester,
         results=results,
