@@ -8,13 +8,13 @@ op_risk:
 
   severity:
     dist: lognormal
-    mu: 1
+    mu: 7.5
     mu_shift: 0.05
-    scale_multiplier: 0.05
-    sigma: 2
+    scale_multiplier: 1.1
+    sigma: 1.5
     data_path: "econ_capital/op_risk/data/sev_data.csv"
-    GPD_THRESHOLD: 150000
-    use_fitted: true
+    GPD_THRESHOLD: 500000
+    use_fitted: false
 
   scenarios:
     cyber_attack:
@@ -34,11 +34,11 @@ op_risk:
 
   stress_tests:
     extreme_event:
-      severity_multiplier: 10
-      frequency_multiplier: 5
+      severity_multiplier: 5
+      frequency_multiplier: 0.05
 
   simulation:
-    num_simulations: 25000
+    num_simulations: 200000
     confidence_level: 0.999
     random_seed: 40
     VAR_LEVELS: [0.95, 0.99, 0.995, 0.999]
