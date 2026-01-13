@@ -107,6 +107,8 @@ def run_full_simulation(
             market_results=market_results,
             credit_results=credit_results,
             op_results=op_results,
+            copula_df=3.0,
+            n_sim=750_000,
         )
     )
 

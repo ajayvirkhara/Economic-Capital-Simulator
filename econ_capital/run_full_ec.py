@@ -40,6 +40,13 @@ def main():
     print("3. Running Operational Risk module...")
     full_op_results = run_op_risk()  # Dict with total_capital + stress test details
 
+    aggregation_kwargs = {
+        "confidence_level": 0.999,
+        "copula_df": 3.0,  # enforced here
+        "n_sim": 750_000,  # safer for df=3
+        "seed": 42,
+    }
+
     # Extract scalars needed for aggregation
     market_results = {
         "var_1y_999": full_market_results.get("var_1y_999", 0.0),
@@ -75,13 +82,13 @@ def main():
         print(f"   {risk:8} | EL: £{vals['EL']:>12,.0f} | UL: £{vals['UL']:>12,.0f}")
 
     # 3. Aggregate with diversification
+    print("\n4. Aggregating with t-copula (df=3)...")
     EL_total, UL_portfolio, EC_total, marginal, div_benefit = (
         aggregate_economic_capital(
-            market_results=market_results,
+            market_results=full_market_results,
             credit_results=full_credit_results,
             op_results=op_results,
-            confidence_level=0.999,
-            copula_df=7.0,
+            **aggregation_kwargs,
         )
     )
 
