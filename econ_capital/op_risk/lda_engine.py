@@ -335,12 +335,20 @@ def run_monte_carlo_simulation(
                 # Use values fitted from historical data
                 mu = stressed_sev_params["lognormal_mu"]
                 sigma = stressed_sev_params["lognormal_sigma"]
-                logger.debug(f"UoM {uom}: Using fitted severity params (mu={mu:.3f}, sigma={sigma:.3f})")
+                logger.debug(
+                    f"UoM {uom}: Using fitted severity params (mu={mu:.3f}, sigma={sigma:.3f})"
+                )
             else:
                 # Use hardcoded values directly from YAML config
-                mu = config.get("severity", {}).get("mu", np.log(10000))  # fallback ~£10k median
-                sigma = config.get("severity", {}).get("sigma", 1.5)      # fallback realistic value
-                logger.info(f"UoM {uom}: Using HARDCODED severity params from config (mu={mu:.3f}, sigma={sigma:.3f})")
+                mu = config.get("severity", {}).get(
+                    "mu", np.log(10000)
+                )  # fallback ~£10k median
+                sigma = config.get("severity", {}).get(
+                    "sigma", 1.5
+                )  # fallback realistic value
+                logger.info(
+                    f"UoM {uom}: Using HARDCODED severity params from config (mu={mu:.3f}, sigma={sigma:.3f})"
+                )
 
             # Stressed mu
             effective_mu_shift = (

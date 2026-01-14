@@ -202,7 +202,7 @@ def test_build_scenario_set_from_data_deterministic_only(
             str(freq_path), str(sev_path), n_random=0
         )
 
-        assert len(scenario_set.scenarios) == 3 # 3 deterministic scenarios
+        assert len(scenario_set.scenarios) == 3  # 3 deterministic scenarios
         shock = scenario_set.scenarios[0]
         assert all(v == 2.0 for v in shock.freq_multiplier.values())
         assert all(v == 2.0 for v in shock.sev_scale_multiplier.values())
