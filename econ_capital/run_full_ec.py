@@ -188,6 +188,20 @@ def main():
 
     print("\n=== Aggregation Complete ===")
 
+    return {
+        "EL_total": EL_total,
+        "UL_portfolio": UL_portfolio,
+        "EC_total": EC_total,
+        "diversification_benefit": div_benefit,
+        "marginal_contributions": marginal,
+        "individual_risks": normalized,
+        "market_details": full_market_results,
+        "credit_details": full_credit_results,
+        "op_details": full_op_results,
+        "run_timestamp": datetime.now().isoformat(),
+        "aggregation_kwargs": aggregation_kwargs,
+    }
+
 
 if __name__ == "__main__":
     main()
