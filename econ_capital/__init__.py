@@ -135,7 +135,20 @@ def run_full_simulation(
         "diversification_benefit": div_benefit,
         "marginal_contributions": marginal.to_dict(),
         "individual_risks": normalized,
+        "market_details": market_results,
+        "credit_details": credit_results,
+        "op_details": full_op_results,
+        "correlations": {
+            "Market": {"Credit": 0.3, "OpRisk": 0.1},
+            "Credit": {"Market": 0.3, "OpRisk": 0.2},
+            "OpRisk": {"Market": 0.1, "Credit": 0.2},
+        },
         "config_override": config_override,
+        "aggregation": {
+            "copula_df": 3.0,
+            "n_sim": 750_000,
+            "confidence_level": 0.999,
+        },
     }
 
     # 5. Save summary JSON
