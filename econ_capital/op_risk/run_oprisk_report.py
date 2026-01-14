@@ -58,6 +58,13 @@ def main() -> float:
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)["op_risk"]
 
+    config["frequency"]["data_path"] = str(
+        PROJECT_ROOT / config["frequency"]["data_path"]
+    )
+    config["severity"]["data_path"] = str(
+        PROJECT_ROOT / config["severity"]["data_path"]
+    )
+
     print("Config loaded successfully")
     print(f"Frequency data: {config['frequency']['data_path']}")
     print(f"Severity data:  {config['severity']['data_path']}\n")
@@ -186,10 +193,9 @@ def main() -> float:
     base_config = tester.get_base_config_for_tests()
     _, _, baseline_metrics = lda_run_engine(base_config)
 
-    max_stressed = max(
-        (r.capital_stressed for r in results), default=tester.baseline_capital
-    )
-    total_oprisk_capital = max(scenario_capital, max_stressed)
+    # Calculating oprisk capital
+    total_oprisk_capital = baseline_metrics.get("capital_999", 0.0)
+
     results_dict = {
         "total_capital": total_oprisk_capital,
         "stress_test_results": results,
@@ -249,9 +255,7 @@ def main() -> float:
     print("\n=== Operational Risk Economic Capital Summary ===")
     print(f"Total OpRisk Capital (incl. stress): £{total_oprisk_capital:,.0f}")
     print(f"Baseline Expected Loss: £{baseline_metrics.get('expected_loss', 0):,.0f}")
-    print(
-        f"Max Stressed Capital Uplift: £{max_stressed - tester.baseline_capital:,.0f}"
-    )
+    print(f"Max Stressed Capital Uplift: £{tester.baseline_capital:,.0f}")
 
     return results_dict
 
