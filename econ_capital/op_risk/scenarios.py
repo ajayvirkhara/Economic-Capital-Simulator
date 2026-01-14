@@ -199,15 +199,17 @@ def build_scenario_set_from_data(
             # Get multipliers, default to 1.0 (no change) if missing
             f_mult = float(s_params.get("frequency_multiplier", 1.0))
             s_mult = float(s_params.get("severity_multiplier", 1.0))
-            
+
             # Create UoM-mapped dictionaries for the Scenario object
-            scenarios.append(Scenario(
-                name=s_name,
-                freq_multiplier={uom: f_mult for uom in uoms},
-                sev_mu_shift={uom: float(np.log(s_mult)) for uom in uoms},
-                sev_scale_multiplier={u: min(s_mult ** 0.6, 5.0) for u in uoms},
-                note=f"YAML-driven scenario: {s_name} (mean ×{s_mult:.1f}, dispersion × min({s_mult:.1f})*0.6, 5)",
-            ))
+            scenarios.append(
+                Scenario(
+                    name=s_name,
+                    freq_multiplier={uom: f_mult for uom in uoms},
+                    sev_mu_shift={uom: float(np.log(s_mult)) for uom in uoms},
+                    sev_scale_multiplier={u: min(s_mult**0.6, 5.0) for u in uoms},
+                    note=f"YAML-driven scenario: {s_name} (mean x{s_mult:.1f}, dispersion x min(({s_mult:.1f}*0.6), 5)",
+                )
+            )
 
     # ────────────────────────────────────────────────
     # Deterministic / named shock scenarios
@@ -219,17 +221,18 @@ def build_scenario_set_from_data(
         deterministic_shock(base, freq_pct=0.2, sev_pct=1.2, name="Severe Cyber Attack")
     )
     scenarios.append(
-        deterministic_shock(base, freq_pct=0.01, sev_pct=1.3, name="Pandemic")
+        deterministic_shock(base, freq_pct=0.01, sev_pct=1.5, name="Pandemic")
     )
 
     # ────────────────────────────────────────────────
     # Stochastic (Monte Carlo style) scenarios
     # ────────────────────────────────────────────────
     if n_random > 0:
-
         # Normal / benign-ish direction
         scenarios.extend(
-            generate_multiplicative_scenarios(base, n=n_random, seed=seed, adverse=False)
+            generate_multiplicative_scenarios(
+                base, n=n_random, seed=seed, adverse=False
+            )
         )
 
         # Optional adverse scenarios
@@ -240,8 +243,8 @@ def build_scenario_set_from_data(
         #        seed=(seed + 1 if seed is not None else None),
         #        adverse=True,
         #    )
-        #)
-        
+        # )
+
     return ScenarioSet(base_profile=base, scenarios=scenarios)
 
 

@@ -83,8 +83,10 @@ def main() -> float:
             }
         )
 
+    total_el = sum(d["annual_el"] for d in scenario_details)
+
     SCENARIO_CAPITAL_MULTIPLIER = 20
-    scenario_capital = scenario_el * SCENARIO_CAPITAL_MULTIPLIER
+    scenario_capital = total_el * SCENARIO_CAPITAL_MULTIPLIER
 
     print("\n" + "=" * 70)
     print("EXPERT JUDGMENT SCENARIO CAPITAL")
@@ -103,7 +105,7 @@ def main() -> float:
 
     # Pass to reporting
     config["expert_scenario_capital"] = scenario_capital
-    config["expert_scenario_el"] = scenario_el
+    config["expert_scenario_el"] = total_el
     config["expert_scenario_details"] = scenario_details
 
     # ──────────────────────────────────────────────────────────────
@@ -125,8 +127,6 @@ def main() -> float:
     yaml_scenarios = config.get("stress_tests", {})
     uom_keys = list(data_set.base_profile.keys())  # e.g. ["UoM1", "UoM2"]
 
-
-
     for name, sdef in yaml_scenarios.items():
         freq_mult = float(sdef.get("frequency_multiplier", 2.0))
         sev_mult = float(sdef.get("severity_multiplier", 3.0))
@@ -135,7 +135,7 @@ def main() -> float:
         freq_mult = min(freq_mult, 10.0)
         sev_mult = min(sev_mult, 10.0)
 
-        dispersion_mult = min(sev_mult ** 0.6, 6.0)   # cap at 6× to avoid NaN/infs
+        dispersion_mult = min(sev_mult**0.6, 6.0)  # cap at 6× to avoid NaN/infs
 
         data_set.scenarios.append(
             Scenario(
