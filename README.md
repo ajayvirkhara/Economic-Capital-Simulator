@@ -133,7 +133,8 @@ Each risk type can be executed and validated independently, with shared utilitie
 ├── LICENSE                             # Project licensing information
 ├── pytest.ini                          # Configuration file for pytest
 ├── README.md                           # Project overview, installation, and usage
-├── requirements.txt                    # List of required Python packages
+├── requirements.txt                    # Core runtime dependencies (minimal to run the project)
+├── requirements-dev.txt                # Development tools, testing, linting & notebook support
 └── setup.py                            # Setup script for packaging the project
 
 ```
@@ -278,40 +279,70 @@ tests/op_risk/test_or_lda_engine.py::test_severity_simulation PASSED
 
 ## 🧰 Installation
 
+### For Users
+To run the simulations and generate reports:
 ```bash
 git clone https://github.com/ajayvirkhara/Economic-Capital-Simulator.git
 cd Economic-Capital-Simulator
 pip install -r requirements.txt
+pip install -e .
 ```
 
-Requirements:
+### For Developers
+To contribute, run tests, or use Jupyter notebooks:
+```bash
+git clone https://github.com/ajayvirkhara/Economic-Capital-Simulator.git
+cd Economic-Capital-Simulator
+pip install -r requirements-dev.txt
+pip install -e .
+pre-commit install
+```
 
-### Core Scientific Stack
+### Core Runtime (requirements.txt)
+───────────────────────────────────────────────
+
+These packages are required to run the risk engines and generate reports.
+
+#### Core Scientific Stack
 * **numpy** (==2.1.1)
 * **pandas** (==2.2.2)
 * **scipy** (==1.14.1)
 
-### Risk/Finance Specific
+#### Risk/Finance Specific
 * **yfinance** (==0.2.40)
 * **arch** (==6.3.0)
 * **pyyaml** (==6.0.2)
 * **pandas-datareader** (==0.10.0)
 
-### Reporting & Excel
+#### Reporting & Excel
 * **openpyxl** (==3.1.5)
 
-### Testing & Linting
-* **pytest** (==8.4.2)
-* **pre-commit** (==3.8.0)
-
-### Utilities
+#### Utilities
 * **tqdm** (==4.66.5)
 
-### Development / Build Tools
-* **setuptools** (>=70.0.0)
+### Development & Quality (requirements-dev.txt)
+───────────────────────────────────────────────
 
-### Optional
-* **jupyter** — Required to run the demo notebooks in the `notebooks/` directory
+Additional tools for contributors / local development.
+
+#### Testing
+* **pytest** (==8.4.2)
+* **pytest-cov** (==4.0.0)
+
+#### Code Quality & Formatting
+* **ruff**
+* **pre-commit** (==3.8.0)
+
+#### Notebook/Interactive Development
+* **pytest** (>=1.0.0)
+* **ipython**
+
+#### Notebook tools
+* **nbstripout** (>=0.6.0)
+
+#### Build & Editable Installation
+* **setuptools** (>=70.0.0)
+* **-e .**
 
 ---
 
