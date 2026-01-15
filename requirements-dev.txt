@@ -1,0 +1,21 @@
+# Existing core dependencies
+-r requirements.txt
+
+# Testing
+pytest==8.4.2
+pytest-cov>=4.0.0
+
+# Code Quality & Formatting
+ruff                   # Fast all-in-one linter and formatter
+pre-commit==3.8.0      # Git hook framework
+
+# Notebook / Interactive Development:
+jupyter>=1.0.0         
+ipython                # Enhanced interactive Python shell
+
+# Notebook tools
+nbstripout>=0.6.0      # Strip notebook outputs
+
+# Build & Editable Installation:
+setuptools>= 70.0.0
+-e .         	       # Editable/local package install

@@ -12,12 +12,6 @@ pandas-datareader==0.10.0
 # Reporting & Excel
 openpyxl==3.1.5
 
-# Testing & linting
-pytest==8.4.2
-pre-commit==3.8.0
-
 # Utilities
 tqdm==4.66.5
 
-# Development / build tools
-setuptools>=70.0.0
