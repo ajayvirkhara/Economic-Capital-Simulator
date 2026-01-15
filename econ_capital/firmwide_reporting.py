@@ -599,7 +599,7 @@ class FirmWideECReporter:
             .get("Total_Standalone", 0)
         )
         ws["A2"] = (
-            f"Standalone OpRisk EC (99.9% t-copula): £{int(round(standalone_oprisk)):,.0f}"
+            f"Standalone OpRisk EC (99.9% t-copula; pre-diversification): £{int(round(standalone_oprisk)):,.0f}"
         )
         ws["A2"].font = Font(bold=True, size=12, color="1F4E78")
 
@@ -704,8 +704,8 @@ class FirmWideECReporter:
 
         op_note_row = ws.max_row + 3
         ws.cell(op_note_row, 1).value = (
-            "Note: 'Baseline Cap' represents the unconditional OpRisk capital estimate before stress testing. "
-            "It does **not** equal the standalone OpRisk EC or firm-wide diversified contribution."
+            "Note: 'Baseline Cap' represents the Standalone (pre-diversification) OpRisk Economic Capital. "
+            "It is an unconditional 99.9% UL estimate derived from statistical modeling and does not include manual Expert Judgment overlays or firm-wide diversification credits."
         )
         ws.cell(op_note_row, 1).font = Font(italic=True, color="555555")
         ws.merge_cells(
