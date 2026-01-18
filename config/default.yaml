@@ -9,3 +9,19 @@ simulation:
   default_n_paths: 5000
   default_time_steps: 6
   default_horizon_years: 1.0
+
+credit_risk:
+  stochastic_params:
+    lgd_volatility: 0.20         # Volatility for stochastic LGD (Beta distribution)
+    pd_volatility: 0.35          # Volatility for stochastic PD (log-normal)
+    use_stochastic_lgd: true     # Enable/disable stochastic LGD
+    use_stochastic_pd: true      # Enable/disable stochastic PD
+  
+  volatility:
+    use_term_structure: true     # Enable time-varying volatility
+    vol_short: 0.30              # Short-term volatility
+    vol_long: 0.18               # Long-term equilibrium volatility
+    mean_reversion: 0.40         # Speed of mean reversion
+  
+  pricing:
+    use_proper_models: true      # Use Black-Scholes/DV01 vs stylized linear+gamma

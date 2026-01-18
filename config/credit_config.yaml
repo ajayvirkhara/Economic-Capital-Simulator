@@ -3,7 +3,7 @@ credit_risk:
   seed: 42
 
   # Correlation structure used in credit factor simulation
-  corr:
+  credit_factor_correlation:
     - [1.0, 0.2, 0.2]
     - [0.2, 1.0, 0.2]
     - [0.2, 0.2, 1.0]
@@ -35,3 +35,18 @@ credit_risk:
   csa_mta: 500000
 
   horizon_steps: 51
+
+  stochastic_params:
+    lgd_volatility: 0.20         # Volatility for stochastic LGD (Beta distribution)
+    pd_volatility: 0.35          # Volatility for stochastic PD (log-normal)
+    use_stochastic_lgd: true     # Enable/disable stochastic LGD
+    use_stochastic_pd: true      # Enable/disable stochastic PD
+  
+  volatility:
+    use_term_structure: true     # Enable time-varying volatility
+    vol_short: 0.30              # Short-term volatility
+    vol_long: 0.18               # Long-term equilibrium volatility
+    mean_reversion: 0.40         # Speed of mean reversion
+  
+  pricing:
+    use_proper_models: true      # Use Black-Scholes/DV01 vs stylized linear+gamma
