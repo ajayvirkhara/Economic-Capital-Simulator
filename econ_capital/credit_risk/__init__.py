@@ -28,6 +28,7 @@ from .allocation import marginal_contribution, allocate_ec
 from .market_model import simulate_credit_factors
 from .wwr import adjust_for_wwr
 from .config import DEFAULT_CONFIG
+from .market_model import simulate_term_structure_volatility
 
 __all__ = [
     # Trade & exposure structure
@@ -54,4 +55,6 @@ __all__ = [
     "load_issuer_spreads_csv",
     "load_credit_indexes",
     "CSV_SCHEMA",
+    # Term structure vol
+    "simulate_term_structure_volatility",
 ]
