@@ -88,6 +88,96 @@ class CreditInputs:
         return np.full_like(times, lam, dtype=float)
 
 
+def simulate_stochastic_lgd(
+    base_lgd: float,
+    n_paths: int,
+    lgd_volatility: float = 0.15,
+    min_lgd: float = 0.10,
+    max_lgd: float = 0.90,
+    seed: int | None = None,
+) -> np.ndarray:
+    """
+    Generate stochastic LGD paths using Beta distribution.
+
+    Parameters
+    ----------
+    base_lgd : float
+        Mean/expected LGD
+    n_paths : int
+        Number of simulation paths
+    lgd_volatility : float
+        Volatility of LGD (controls Beta distribution spread)
+
+    Returns
+    -------
+    lgd_paths : np.ndarray, shape (n_paths,)
+        Simulated LGD values
+    """
+    rng = np.random.default_rng(seed)
+
+    # Parametrize Beta distribution to match mean and volatility
+    mean = np.clip(base_lgd, 0.01, 0.99)
+    var = (lgd_volatility * mean) ** 2
+
+    # Beta parameters
+    alpha = mean * (mean * (1 - mean) / var - 1)
+    beta = (1 - mean) * (mean * (1 - mean) / var - 1)
+
+    # Ensure valid parameters
+    alpha = max(alpha, 0.5)
+    beta = max(beta, 0.5)
+
+    lgd_paths = rng.beta(alpha, beta, size=n_paths)
+    return np.clip(lgd_paths, min_lgd, max_lgd)
+
+
+def simulate_stochastic_pd(
+    base_pd: float,
+    n_paths: int,
+    credit_cycle_factor: np.ndarray | None = None,
+    pd_volatility: float = 0.30,
+    shock_scale: float = 1.0,
+    seed: int | None = None,
+) -> np.ndarray:
+    """
+    Generate stochastic PD paths with credit cycle sensitivity.
+
+    Parameters
+    ----------
+    base_pd : float
+        Base annual PD
+    n_paths : int
+        Number of paths
+    credit_cycle_factor : np.ndarray, optional
+        Systematic credit factor (n_paths,), e.g., from simulate_credit_factors
+    pd_volatility : float
+        Idiosyncratic PD volatility
+
+    Returns
+    -------
+    pd_paths : np.ndarray, shape (n_paths,)
+    """
+    rng = np.random.default_rng(seed)
+
+    # Log-normal model for PD
+    log_pd_mean = np.log(base_pd + 1e-6)
+
+    if credit_cycle_factor is not None:
+        # Systematic component from credit cycle
+        systematic_shock = 1.0 + shock_scale * pd_volatility * credit_cycle_factor
+    else:
+        systematic_shock = 1.0
+
+    # Idiosyncratic component
+    idio_shock = pd_volatility * rng.standard_normal(n_paths)
+
+    # Combined
+    log_pd = log_pd_mean + systematic_shock + idio_shock
+    pd_paths = np.exp(log_pd)
+
+    return np.clip(pd_paths, 0.0001, 0.50)
+
+
 # --------------------------------------------------------------------
 # 2. Default Probability Computation
 # --------------------------------------------------------------------
@@ -155,16 +245,32 @@ def _loss_profile(
     credit: CreditInputs,
     discount: Optional[np.ndarray] = None,
     discounted: bool = True,
+    lgd_paths: Optional[np.ndarray] = None,
+    pd_paths: Optional[np.ndarray] = None,
 ) -> Tuple[float, pds.DataFrame]:
-    """Internal engine for CVA / EL computation."""
+    """Internal engine for CVA / EL computation with stochastic LGD/PD support."""
     times = np.asarray(times, dtype=float)
     ead = np.asarray(ead, dtype=float)
+
+    # Use stochastic LGD if provided
+    if lgd_paths is not None:
+        lgd = lgd_paths.mean()  # Use mean for expected loss
+    else:
+        lgd = credit.effective_lgd()
+
+    # Use stochastic PD if provided
+    if pd_paths is not None:
+        # Average across paths for expected default probability
+        avg_pd = pd_paths.mean()
+        hz = -np.log(1.0 - np.clip(avg_pd, 0.0, 0.999999))
+        hz = np.full_like(times, hz)
+    else:
+        hz = credit.get_hazard_curve(times)
+
+    dpd = incremental_default_prob(times, hz)
+
     if ead.shape != times.shape:
         raise ValueError("EAD and time grid must have the same length")
-
-    hz = credit.get_hazard_curve(times)
-    dpd = incremental_default_prob(times, hz)
-    lgd = credit.effective_lgd()
 
     # discount curve or flat rate
     if discount is None:
