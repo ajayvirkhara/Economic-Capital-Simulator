@@ -28,8 +28,17 @@ from econ_capital.credit_risk.allocation import allocate_ec
 from econ_capital.utils import setup_logging, validate_shape, timed_section
 from econ_capital.credit_risk.config import DEFAULT_CONFIG
 from econ_capital.credit_risk.market_model import simulate_credit_factors
-from econ_capital.credit_risk.wwr import adjust_for_wwr
+from econ_capital.credit_risk.wwr import (
+    simulate_asset_value_process,
+    compute_default_threshold_from_pd,
+    structural_wwr_adjustment,
+    adjust_for_wwr,
+)
 from econ_capital.config_loader import merge_with_global
+from econ_capital.credit_risk.default_model import (
+    simulate_stochastic_lgd,
+    simulate_stochastic_pd,
+)
 
 logger = setup_logging(__name__)
 
@@ -79,6 +88,10 @@ def aggregate_credit_losses(
 
     confidence = confidence or params.get("confidence_level", 0.999)
 
+    # Extract market model parameters
+    credit_config = params.get("credit_risk", {})
+    market_config = credit_config.get("market_model", {})
+
     el = np.asarray(el, dtype=float)
     ul = np.asarray(ul, dtype=float)
     corr = np.asarray(corr, dtype=float)
@@ -110,7 +123,8 @@ def aggregate_credit_losses(
     factors = simulate_credit_factors(
         n_paths=n_sims,
         n_steps=len(el),
-        corr=params.get("default_correlation", 0.2),
+        corr=params.get("credit_factor_correlation", 0.2),
+        vol=market_config.get("vol", 0.20),
         seed=seed,
     )
 
@@ -139,10 +153,11 @@ def aggregate_credit_losses(
 def compute_counterparty_risk_profiles(
     counterparties: list[dict],
     config: dict | None = None,
+    use_structural_wwr: bool = True,
 ) -> pd.DataFrame:
     """
     Compute EL and UL per counterparty, simulate correlated factors,
-    and apply WWR adjustment.
+    and apply optional WWR adjustment.
 
     Parameters
     ----------
@@ -155,17 +170,53 @@ def compute_counterparty_risk_profiles(
         Columns = [name, EAD, PD, LGD, EL, UL, EL_adj]
     """
 
+    # ========== DEBUG BLOCK ==========
+    print("\n" + "=" * 60)
+    print("DEBUG: compute_counterparty_risk_profiles() called")
+    print(f"Config passed in: {config is not None}")
+    print(f"use_structural_wwr parameter: {use_structural_wwr}")
+    # ========== DEBUG BLOCK ==========
+
     params = DEFAULT_CONFIG.copy()
     if config:
         params.update(config)
     params = merge_with_global(params)  # ← Merge global defaults
 
+    # Extract credit-specific config flags
+    print(f"\nMerged params keys: {list(params.keys())}")
+    print(f"'credit_risk' in params: {'credit_risk' in params}")
+    credit_config = params.get("credit_risk", {})
+    print(f"credit_config: {credit_config}")
+
+    # Stochastic parameter flags
+    stochastic_config = credit_config.get("stochastic_params", {})
+    print(f"\nStochastic config: {stochastic_config}")
+    use_stochastic_lgd = stochastic_config.get("use_stochastic_lgd", True)
+    use_stochastic_pd = stochastic_config.get("use_stochastic_pd", True)
+    print(f"use_stochastic_lgd: {use_stochastic_lgd}")
+    print(f"use_stochastic_pd: {use_stochastic_pd}")
+
+    lgd_volatility = stochastic_config.get("lgd_volatility", 0.20)
+    pd_volatility = stochastic_config.get("pd_volatility", 0.35)
+
+    # WWR flags
+    wwr_config = credit_config.get("wwr", {})
+    use_structural_wwr = wwr_config.get(
+        "use_structural_model", use_structural_wwr
+    )  # Use config or parameter
+    print(f"use_structural_wwr (from config): {use_structural_wwr}")
+    print("=" * 60 + "\n")
+
+    correlation_expo_asset = wwr_config.get("correlation_expo_asset", -0.40)
+    asset_volatility = wwr_config.get("asset_volatility", 0.35)
+
+    # Extract market model parameters
+    market_config = credit_config.get("market_model", {})
+
     df = pd.DataFrame(counterparties)
 
-    # Base expected & unexpected losses
+    # Define EAD column name
     EAD_col = "EAD" if "EAD" in df.columns else "EAD_final"
-    df["EL"] = df[EAD_col] * df["PD"] * df["LGD"]
-    df["UL"] = df[EAD_col] * np.sqrt(df["PD"] * (1 - df["PD"])) * df["LGD"]
 
     sim_cfg = params.get("simulation", {})
     n_paths = sim_cfg.get("default_n_paths", 5000)
@@ -176,15 +227,58 @@ def compute_counterparty_risk_profiles(
         n_paths=n_paths,
         n_steps=len(df),
         corr=params.get("corr", 0.2),
+        vol=market_config.get("vol", 0.20),
         seed=seed,
     )
 
-    # Map factors into loss shocks (factor ↑ → higher loss)
-    base_losses = df["EL"].values[None, :]
-    shocked_losses = base_losses * (
-        1 + 0.5 * factors
-    )  # 10% sensitivity to factor movement
-    simulated_mean_losses = shocked_losses.mean(axis=0)
+    # Stochastic LGD and PD
+    EL_stochastic = []
+    UL_stochastic = []
+    rng = np.random.default_rng(seed)
+
+    for idx, row in df.iterrows():
+        lgd_floor = stochastic_config.get("lgd_floor", 0.10)
+        lgd_ceiling = stochastic_config.get("lgd_ceiling", 0.75)
+        base_lgd = rng.uniform(lgd_floor, lgd_ceiling)
+
+        # Generate stochastic LGD
+        if use_stochastic_lgd:
+            lgd_paths = simulate_stochastic_lgd(
+                base_lgd=base_lgd,
+                n_paths=n_paths,
+                lgd_volatility=lgd_volatility,
+                seed=seed + idx,
+            )
+        else:
+            lgd_paths = np.full(n_paths, base_lgd)  # Fixed LGD
+
+        base_pd = row.get("PD", 0.01)
+        pd_min = params.get("pd_min", 1e-6)
+        pd_max = params.get("pd_max", 0.30)
+        base_pd = np.clip(base_pd, pd_min, pd_max)
+        ead = row.get("EAD", row.get("EAD_final", 0))
+
+        # Generate stochastic PD with credit cycle
+        if use_stochastic_pd:
+            pd_paths = simulate_stochastic_pd(
+                base_pd=base_pd,
+                n_paths=n_paths,
+                credit_cycle_factor=factors[:, idx] if idx < factors.shape[1] else None,
+                pd_volatility=pd_volatility,
+                shock_scale=market_config.get("shock_scale", 0.10),
+                seed=seed + idx + 1000,
+            )
+        else:
+            pd_paths = np.full(n_paths, base_pd)  # Fixed PD
+
+        # Compute path-wise losses
+        losses = ead * lgd_paths * pd_paths
+
+        EL_stochastic.append(losses.mean())
+        UL_stochastic.append(losses.std())
+
+    df["EL"] = EL_stochastic
+    df["UL"] = UL_stochastic
 
     # Reduce factors to a per-counterparty metric (mean over paths)
     factor_means = factors.mean(axis=0).reshape(1, -1)
@@ -192,14 +286,52 @@ def compute_counterparty_risk_profiles(
     # Use average factor correlation for WWR adjustment
     wwr_corr = params.get("wwr_corr", 0.2)
 
-    df["EL_adj"] = adjust_for_wwr(
-        simulated_mean_losses.reshape(1, -1),
-        credit_factors=factor_means,
-        sensitivity=wwr_corr,
-    ).ravel()
+    if use_structural_wwr:
+        # Simulate asset values for all counterparties
+        asset_values = simulate_asset_value_process(
+            n_paths=n_paths,
+            n_counterparties=len(df),
+            volatility=asset_volatility,
+            correlation=params.get("asset_correlation", 0.25),
+            seed=seed + 999,
+        )
 
-    # Representative simulated loss metric (mean across paths)
-    df["Simulated_Loss"] = simulated_mean_losses
+        # Compute default thresholds from PDs
+        default_thresholds = np.array(
+            [compute_default_threshold_from_pd(pd) for pd in df["PD"].values]
+        )
 
-    logger.debug("Computed counterparty EL/UL/EL_adj table:\n%s", df)
+        # Get systematic factors
+        sys_factors = factors.mean(axis=1)  # Average across counterparties
+
+        # Base exposures (n_paths x n_counterparties)
+        base_exposures = np.tile(df[EAD_col].values, (n_paths, 1))
+
+        # Apply structural WWR
+        wwr_exposures, conditional_pds = structural_wwr_adjustment(
+            exposures=base_exposures,
+            default_thresholds=default_thresholds,
+            systematic_factors=sys_factors,
+            asset_values=asset_values,
+            correlation_expo_asset=correlation_expo_asset,  # Negative = wrong-way
+            seed=seed + 888,
+        )
+
+        # Update EL with structural WWR
+        df["EL_adj"] = (wwr_exposures * conditional_pds * df["LGD"].values).mean(axis=0)
+        df["Simulated_Loss"] = (wwr_exposures * df["LGD"].values).mean(axis=0)
+    else:
+        df["EL_adj"] = adjust_for_wwr(
+            np.array(EL_stochastic).reshape(1, -1),
+            credit_factors=factor_means,
+            sensitivity=wwr_corr,
+        ).ravel()
+    pass
+
+    # Standardize WWR column names for reporting
+    df["EL_WWR"] = df.get("EL_adj", df["EL"])
+    df["UL_WWR"] = df["UL"]
+    logger.debug("Added WWR columns to df")
+
+    logger.debug("Computed stochastic EL/UL table:\n%s", df)
     return df
