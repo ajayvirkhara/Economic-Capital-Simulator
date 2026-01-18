@@ -19,6 +19,8 @@ from econ_capital.utils import setup_logging
 
 from .trade_models import NettingSet
 from .exposure_models import _build_collateral_path, _compute_mtm
+from .config import DEFAULT_CONFIG
+from econ_capital.config_loader import merge_with_global
 
 logger = setup_logging(__name__)
 
@@ -37,6 +39,7 @@ class ExposureEngine:
         n_paths: int,
         pfe_quantile: float = 0.975,
         alpha_factor: float = 1.4,
+        vol_term_structure: np.ndarray | None = None,
     ):
         self.netting_set = netting_set
         self.market_paths = market_paths
@@ -44,13 +47,24 @@ class ExposureEngine:
         self.n_paths = n_paths
         self.pfe_quantile = pfe_quantile
         self.alpha_factor = alpha_factor
+        self.vol_term_structure = vol_term_structure
+
+        merged_config = merge_with_global(DEFAULT_CONFIG)
+        credit_config = merged_config.get("credit_risk", {})
+        pricing_config = credit_config.get("pricing", {})
+
+        self.use_proper_pricing = pricing_config.get("use_proper_models", True)
 
     # -----------------------------------------------------------------------
     # Public API
     # -----------------------------------------------------------------------
     def compute_mtm_only(self) -> np.ndarray:
         """Return mark-to-market array before collateral and exposure clipping."""
-        return _compute_mtm(self.netting_set.trades, self.market_paths)
+        return _compute_mtm(
+            self.netting_set.trades,
+            self.market_paths,
+            use_proper_pricing=self.use_proper_pricing,  # Pass pricing flag to MTM computation
+        )
 
     def compute_exposure_profile(self) -> tuple[np.ndarray, pd.DataFrame]:
         """

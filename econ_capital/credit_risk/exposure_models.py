@@ -20,12 +20,11 @@ logger = setup_logging(__name__)
 # -----------------------------------------------------------------------
 
 
-def _compute_mtm(trades, market_paths) -> np.ndarray:
+def _compute_mtm(trades, market_paths, use_proper_pricing: bool = True) -> np.ndarray:
     """
-    Compute total MTM across all trades and market factors.
+    Compute total MTM using proper pricing models.
 
-    Formula (stylised):
-        MTM_t = Σ [ w * (ΔS/S0) + 0.5 * γ * (ΔS/S0)^2 + add ]
+    Falls back to stylized pricing for basic Trade objects.
     """
     logger.debug("Computing MTM for %d trades", len(trades))
     first_shape = next(iter(market_paths.values())).shape
@@ -36,19 +35,25 @@ def _compute_mtm(trades, market_paths) -> np.ndarray:
         if tr.factor not in market_paths:
             raise ValueError(f"Trade {tr.name} refers to unknown factor {tr.factor}")
 
-        S = market_paths[tr.factor]
-        validate_shape(S, first_shape, name=f"market_paths[{tr.factor}]")
+        # Check if trade has a pricing method
+        if hasattr(tr, "price") and callable(tr.price):
+            # Use proper pricing model
+            logger.debug(f"Using pricing model for {tr.name}")
+            for t in range(n_steps):
+                mtm[:, t] += tr.price(market_paths, t)
+        else:
+            # Fall back to stylized linear + gamma pricing
+            logger.debug(f"Using stylized pricing for {tr.name}")
+            S = market_paths[tr.factor]
+            validate_shape(S, first_shape, name=f"market_paths[{tr.factor}]")
 
-        # Use relative price changes for better dynamics
-        rel_dS = (S - S[:, [0]]) / S[:, [0]]
-
-        # Stylised linear + convexity MTM model
-        trade_mtm = tr.w * rel_dS + 0.5 * tr.gamma * (rel_dS**2) + tr.add
-
-        # Optional: scaling to bring magnitudes into realistic ranges
-        trade_mtm *= 100  # scale by notional if needed
-
-        mtm += trade_mtm
+            # Use relative price changes for better dynamics
+            rel_dS = (S - S[:, [0]]) / S[:, [0]]
+            trade_mtm = (
+                tr.w * rel_dS + 0.5 * tr.gamma * (rel_dS**2) + tr.add
+            )  # Stylised linear + convexity MTM model
+            trade_mtm *= 100  # scale by notional
+            mtm += trade_mtm
 
     logger.debug(
         "MTM computed successfully with mean=%.4f, std=%.4f",
