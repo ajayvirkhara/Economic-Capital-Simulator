@@ -18,7 +18,11 @@ from econ_capital.credit_risk import (
     compute_counterparty_risk_profiles,
     aggregate_credit_losses,
     simulate_credit_factors,
+    simulate_term_structure_volatility,
 )
+
+from econ_capital.credit_risk.config import DEFAULT_CONFIG
+from econ_capital.config_loader import merge_with_global
 
 logger = setup_logging(__name__)
 
@@ -127,14 +131,37 @@ def main():
 
 
 def _simulate_sp500_paths(n_paths, times, s0=100.0, mu=0.0, sigma=0.25, seed=42):
+    # Read config
+    merged_config = merge_with_global(DEFAULT_CONFIG)
+    credit_config = merged_config.get("credit_risk", {})
+    vol_config = credit_config.get("volatility", {})
+
+    use_term_structure = vol_config.get("use_term_structure", True)
+
+    # Random seed
     rng = np.random.default_rng(seed)
+
+    # Generate term structure volatility if enabled
+    if use_term_structure:
+        vol_curve = simulate_term_structure_volatility(
+            times,
+            vol_short=vol_config.get("vol_short", 0.30),
+            vol_long=vol_config.get("vol_long", 0.18),
+            mean_reversion=vol_config.get("mean_reversion", 0.40),
+        )
+    else:
+        vol_curve = np.full_like(times, sigma)  # Constant volatility
+
     z = rng.standard_normal((n_paths, len(times)))
     S = np.empty_like(z)
     S[:, 0] = s0
     dt = np.diff(np.concatenate([[0.0], times]))
+
     for k in range(1, len(times)):
+        # Use time-varying volatility
+        vol_t = vol_curve[k]
         S[:, k] = S[:, k - 1] * np.exp(
-            (mu - 0.5 * sigma**2) * dt[k] + sigma * np.sqrt(dt[k]) * z[:, k]
+            (mu - 0.5 * vol_t**2) * dt[k] + vol_t * np.sqrt(dt[k]) * z[:, k]
         )
     return {"SP500": S}
 

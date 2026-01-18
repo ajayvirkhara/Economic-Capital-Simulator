@@ -11,7 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 import yaml
 import numpy as np
-import pandas as pd
 from scipy.stats import t
 import logging
 
@@ -25,8 +24,11 @@ from econ_capital.credit_risk.csa import CSA
 from econ_capital.credit_risk.exposure_engine import ExposureEngine
 from econ_capital.credit_risk.creditrisk_reporting import generate_creditrisk_report
 from econ_capital.credit_risk.config import DEFAULT_CONFIG
-from econ_capital.credit_risk.wwr import adjust_for_wwr
-from econ_capital.credit_risk.market_model import simulate_credit_factors
+from econ_capital.credit_risk.market_model import (
+    simulate_term_structure_volatility,
+)
+from econ_capital.config_loader import merge_with_global
+from econ_capital.credit_risk.ccr_engine import compute_counterparty_risk_profiles
 
 # Silence the noisy exposure engine logger
 lda_logger = logging.getLogger("econ_capital.credit_risk.exposure_engine")
@@ -53,13 +55,17 @@ def main():
     # ------------------------------------------------------------------
     # 2. LOAD CONFIG
     # ------------------------------------------------------------------
-    config = DEFAULT_CONFIG.copy()
+    config = {"credit_risk": DEFAULT_CONFIG.copy()}  # nested config
     # Override with a local YAML if it exists in the root
     config_path = PROJECT_ROOT / "config" / "credit_config.yaml"
     if config_path.exists():
         with open(config_path, "r") as f:
             yaml_conf = yaml.safe_load(f) or {}
-            config.update(yaml_conf.get("credit_risk", {}))
+            if "credit_risk" in yaml_conf:
+                config.setdefault("credit_risk", {}).update(yaml_conf["credit_risk"])
+            else:
+                # Merge whole yaml_conf if not nested (flat config)
+                config.update(yaml_conf)
 
     # ------------------------------------------------------------------
     # 3. LOAD DATA
@@ -108,7 +114,7 @@ def main():
 
     market_paths = {"SP500": prices}
 
-    results_list = []
+    counterparty_data = []
 
     for cpty in unique_cptys:
         cpty_data = df_positions[df_positions["counterparty"] == cpty]
@@ -128,18 +134,33 @@ def main():
         ]
         ns = NettingSet(counterparty=cpty, trades=trades, csa=CSA(threshold=5_000_000))
 
-        # Run Exposure Engine
-        engine = ExposureEngine(ns, market_paths, times, n_paths)
+        # Global config overrides
+        merged_config = merge_with_global(config)
+        credit_config = merged_config.get("credit_risk", {})
+        vol_config = credit_config.get("volatility", {})
+
+        # Generate vol term structure if enabled
+        if vol_config.get("use_term_structure", True):
+            vol_curve = simulate_term_structure_volatility(
+                times,
+                vol_short=vol_config.get("vol_short", 0.30),
+                vol_long=vol_config.get("vol_long", 0.18),
+                mean_reversion=vol_config.get("mean_reversion", 0.40),
+            )
+        else:
+            vol_curve = None
+
+        # Run Exposure Engine with vol term structure
+        engine = ExposureEngine(
+            ns,
+            market_paths,
+            times,
+            n_paths,
+            vol_term_structure=vol_curve,  # NEW
+        )
         _, summary = engine.compute_exposure_profile()
+
         ead_final = summary["EAD_final"].iloc[0]
-
-        # Compute Expected Loss (EL) - Basel Standard
-        ead_final_scalar = summary["EAD_final"].iloc[0]
-        el = ead_final_scalar * pd_val * 0.45
-
-        # Compute Bernoulli Unexpected Loss (UL)
-        # UL = EAD * LGD * sqrt(PD * (1-PD))
-        ul = ead_final * 0.45 * np.sqrt(pd_val * (1 - pd_val))
 
         # Determine Sector for reporting/differentiation
         sector = "Corporate"
@@ -148,45 +169,19 @@ def main():
         elif "HEDGE" in cpty.upper() or "FUND" in cpty.upper():
             sector = "Hedge Fund"
 
-        results_list.append(
+        counterparty_data.append(
             {
                 "name": cpty,
                 "Sector": sector,
                 "EAD": ead_final,
                 "PD": pd_val,
                 "LGD": 0.45,
-                "EL": el,
-                "UL": ul,
             }
         )
 
-    df_results = pd.DataFrame(results_list)
-
-    # ────────────────────────────────────────────────────────────────
-    # Apply Wrong-Way Risk
-    credit_factors = simulate_credit_factors(
-        n_paths=5000, n_steps=len(df_results), corr=0.25, seed=42 + 1
-    )
-
-    # Simple strong version
-    df_results["EL_WWR"] = adjust_for_wwr(
-        exposures=df_results["EL"].values,
-        credit_factors=credit_factors.mean(axis=0),
-        sensitivity=0.35,
-        apply_to_volatility=False,
-    )
-
-    df_results["UL_WWR"] = adjust_for_wwr(
-        exposures=df_results["UL"].values,
-        credit_factors=credit_factors.mean(axis=0),
-        sensitivity=0.35 * 3.0,  # stronger for UL/tail
-        apply_to_volatility=True,
-        min_factor=0.6,
-    )
-
-    print(
-        "WWR columns created:",
-        ["EL_WWR" in df_results.columns, "UL_WWR" in df_results.columns],
+    print("\nComputing risk profiles for all counterparties...")
+    df_results = compute_counterparty_risk_profiles(
+        counterparties=counterparty_data, config=config
     )
 
     # ------------------------------------------------------------------
