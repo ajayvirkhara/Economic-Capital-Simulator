@@ -47,13 +47,176 @@ $$
 
 ---
 
-## 2. Credit Risk Engine: CCR & Default Correlation
-The Credit engine simulates the portfolio's credit loss distribution by modeling counterparty migration and systemic shocks.
+## 2. Credit Risk Engine: Stochastic CCR with Structural WWR
 
-* **Exposure Profiles:** Stylised Monte-Carlo simulation of mark-to-market and collateral-adjusted exposure paths (**EE**, **PFE**, **EPE**) under single-factor market scenarios and simple CSA rules.
-* **Wrong-Way Risk (WWR):** Simple heuristic adjustment that scales **EL** or **UL** based on simulated credit factor realisations (sensitivity 0.3–0.7 range). Not a fully structural / joint simulation of exposure and default probability.
-* **Credit Factor Model:** One-factor Gaussian model generates correlated credit factor shocks per counterparty. Losses are scaled from base EL using these factors (with optional WWR adjustment). No path-wise individual default simulation is performed.
-* **Unexpected Loss (UL):** While Expected Loss (EL) is treated as a cost of business, the engine focuses on **UL** to determine the Economic Capital requirement at high confidence intervals (e.g., 99.9%). Portfolio UL is derived from counterparty-level volatilities and correlation matrix; economic capital = EL + Φ⁻¹(0.999) × √Var(L).
+The Credit engine has been enhanced from stylised approximations to a comprehensive stochastic framework capturing realistic tail dependencies.
+
+### 2.1 Proper Derivative Pricing
+
+**Black-Scholes Option Pricing:**
+For European options, the engine implements the closed-form Black-Scholes formula:
+
+$$
+C(S,t) = S \cdot \Phi(d_1) - K e^{-r(T-t)} \cdot \Phi(d_2)
+$$
+
+$$
+P(S,t) = K e^{-r(T-t)} \cdot \Phi(-d_2) - S \cdot \Phi(-d_1)
+$$
+
+where:
+
+$$
+d_1 = \frac{\ln(S/K) + (r + \sigma^2/2)(T-t)}{\sigma\sqrt{T-t}}, \quad d_2 = d_1 - \sigma\sqrt{T-t}
+$$
+
+**DV01-based Swap Pricing:**
+Interest rate swaps use a simplified DV01 approximation:
+
+$$
+\text{MTM}_{\text{swap}} = \text{DV01} \times (r_{\text{market}} - r_{\text{fixed}}) \times 10000
+$$
+
+$$
+\text{DV01} = \frac{\text{Notional} \times \text{Tenor}}{10000}
+$$
+
+**Fallback to Stylised Pricing:**
+For basic Trade objects without a `price()` method, the engine falls back to the linear + gamma approximation:
+
+$$
+\text{MTM}_t = w \cdot \frac{\Delta S}{S_0} + \frac{1}{2} \gamma \cdot \left(\frac{\Delta S}{S_0}\right)^2 + \text{add}
+$$
+
+### 2.2 Stochastic Credit Parameters
+
+**Stochastic Loss Given Default (LGD):**
+LGD is modeled via a Beta distribution to ensure values remain in [0,1]:
+
+$$
+\text{LGD} \sim \text{Beta}(\alpha, \beta)
+$$
+
+where α and β are calibrated to match:
+- Mean: base LGD from data
+- Variance: `lgd_volatility²` × (base LGD)²
+
+**Stochastic Probability of Default (PD):**
+PD follows a log-normal process with credit cycle sensitivity:
+
+$$
+\ln(\text{PD}_i) = \ln(\text{PD}_{\text{base}}) + \beta \cdot Z_{\text{sys}} + \sigma_{\text{idio}} \cdot Z_i
+$$
+
+where:
+- $Z_{\text{sys}}$ = systematic credit factor (common across counterparties)
+- $Z_i$ = idiosyncratic shock
+- β = `pd_volatility` × `shock_scale` (default 0.35 × 0.10 = 0.035)
+
+**Path-wise Loss Simulation:**
+For each counterparty and each Monte Carlo path:
+
+$$
+L_{i,p} = \text{EAD}_i \times \text{LGD}_{i,p} \times \text{PD}_{i,p}
+$$
+
+Expected Loss and Unexpected Loss:
+
+$$
+\text{EL}_i = \mathbb{E}_p[L_{i,p}], \quad \text{UL}_i = \sqrt{\text{Var}_p(L_{i,p})}
+$$
+
+### 2.3 Time-Varying Volatility Term Structure
+
+Market factor volatility decays from short-term to long-term equilibrium via exponential mean reversion:
+
+$$
+\sigma(t) = \sigma_{\infty} + (\sigma_0 - \sigma_{\infty}) \cdot e^{-\kappa t}
+$$
+
+where:
+- $\sigma_0$ = `vol_short` (short-term volatility, default 30%)
+- $\sigma_{\infty}$ = `vol_long` (long-term equilibrium, default 18%)
+- κ = `mean_reversion` (speed of convergence, default 0.40)
+
+This replaces constant volatility in market path simulation, capturing the empirical term structure of implied volatility.
+
+### 2.4 Structural Wrong-Way Risk (WWR)
+
+The engine implements a Merton-style framework for joint exposure-default modeling.
+
+**Asset Value Process (Merton Model):**
+Each counterparty's asset value follows a geometric Brownian motion:
+
+$$
+A_i = A_0 \exp\left[\left(\mu - \frac{\sigma_A^2}{2}\right) + \sigma_A \left(\sqrt{\rho} Z_{\text{sys}} + \sqrt{1-\rho} Z_i\right)\right]
+$$
+
+**Default Threshold:**
+Default occurs when asset value falls below a threshold derived from PD:
+
+$$
+D_i = \Phi^{-1}(\text{PD}_i)
+$$
+
+**Exposure-Asset Correlation:**
+Exposures are adjusted based on distance-to-default:
+
+$$
+\text{Exposure}_{i,p}^{\text{WWR}} = \text{EAD}_i \times \left[1 + 0.5 \cdot \max\left(-\frac{A_{i,p} - D_i}{\sigma_A}, 0\right)^2\right] \times (1 + 0.15 \cdot Z_{i,p}^{\text{corr}})
+$$
+
+where:
+
+$$
+Z_{i,p}^{\text{corr}} = \rho_{\text{EA}} \cdot \frac{A_{i,p} - \bar{A}_i}{\sigma_A} + \sqrt{1 - \rho_{\text{EA}}^2} \cdot Z_{\text{expo}}
+$$
+
+and $\rho_{\text{EA}}$ = `correlation_expo_asset` (default -0.40, negative = wrong-way).
+
+**Conditional PD (Vasicek Model):**
+
+$$
+\text{PD}_i^{\text{cond}}(Z_{\text{sys}}) = \Phi\left(\frac{\Phi^{-1}(D_i) - \sqrt{\rho} Z_{\text{sys}}}{\sqrt{1-\rho}}\right)
+$$
+
+**Backward Compatibility:**
+A simple heuristic WWR scaler is retained for legacy usage:
+
+$$
+\text{EL}^{\text{WWR}} = \text{EL} \times (1 + s \times \max(Z_{\text{factor}}, 0))
+$$
+
+where s = `sensitivity` (typically 0.3–0.7).
+
+### 2.5 Exposure Profiles & CSA Mechanics
+
+* **Variation Margin (VM):** Applied at configurable frequencies (daily, weekly, annual) with threshold and MTA checks
+* **Initial Margin (IM):** Static buffer added to collateral balance
+* **Exposure Metrics:**
+  - Expected Exposure: $\text{EE}(t) = \mathbb{E}[\max(\text{MTM}(t) - \text{Collateral}(t), 0)]$
+  - Potential Future Exposure: $\text{PFE}_\alpha(t) = \text{quantile}_\alpha[\max(\text{MTM}(t) - \text{Collateral}(t), 0)]$
+  - Expected Positive Exposure: $\text{EPE} = \frac{1}{T} \int_0^T \text{EE}(t) \, dt$
+  - Exposure at Default: $\text{EAD} = \alpha_{\text{factor}} \times \text{EPE}$ (regulatory alpha = 1.4)
+
+### 2.6 Portfolio Aggregation
+
+**Unexpected Loss (UL):**
+Portfolio UL incorporates correlation structure:
+
+$$
+\text{UL}_{\text{portfolio}} = \sqrt{\mathbf{UL}^\top \mathbf{R} \, \mathbf{UL}}
+$$
+
+where **R** is the counterparty correlation matrix.
+
+**Economic Capital:**
+
+$$
+\text{EC} = \text{EL}_{\text{total}} + \Phi^{-1}(\alpha) \times \text{UL}_{\text{portfolio}}
+$$
+
+Default confidence level: α = 99.9% (Student-t quantile with df=3).
 
 ---
 
@@ -98,11 +261,36 @@ $$
 
 #### Credit Risk Parameters
 
-- **Systemic correlation (ρ)**: Default 0.2 in the 1-factor Gaussian credit model (configurable).
-- **Alpha factor (α)**: 1.4 applied to cumulative EPE → EAD (regulatory-style multiplier).
-- **Recovery rate**: Default 40% (LGD=60%) unless overridden per counterparty.
-- **Confidence level**: 99.9% for economic capital.
-- **Wrong-way risk (WWR)**: Optional linear scaling of EL/UL based on simulated credit factors (sensitivity typically 0.3–0.7).
+**Core Risk Parameters:**
+- **Systemic correlation (ρ)**: Default 0.2 in 1-factor Gaussian credit model (used in `simulate_credit_factors`)
+- **Alpha factor (α)**: 1.4 applied to cumulative EPE → EAD (regulatory multiplier in `ExposureEngine`)
+- **Base recovery rate**: Default 40% (LGD=60%) used as baseline for stochastic LGD simulation
+- **Confidence level**: 99.9% for economic capital (Student-t df=3 quantile)
+- **Heuristic WWR sensitivity**: 0.3–0.7 range (available as fallback when `use_structural_model=false`)
+
+**Pricing Models:**
+- **Use proper models flag**: `use_proper_models` (default `true`) enables Black-Scholes/DV01 pricing
+- **Black-Scholes parameters**: Risk-free rate 2%, configurable per option
+- **Swap DV01**: Based on notional and tenor (5 years default)
+
+**Stochastic Credit Parameters:**
+- **LGD volatility**: Default 20% (Beta distribution variance)
+- **PD volatility**: Default 35% (log-normal idiosyncratic component)
+- **Shock scale**: Default 0.10 (systematic PD sensitivity multiplier)
+- **LGD bounds**: [10%, 90%] hard limits
+- **PD bounds**: [0.01%, 50%] hard limits
+
+**Volatility Term Structure:**
+- **Short-term vol (σ₀)**: Default 30%
+- **Long-term vol (σ∞)**: Default 18%
+- **Mean reversion (κ)**: Default 0.40
+- **Formula**: σ(t) = σ∞ + (σ₀ - σ∞)·exp(-κt)
+
+**Structural WWR:**
+- **Asset volatility**: Default 35%
+- **Asset correlation**: Default 0.25 (systemic component)
+- **Exposure-asset correlation**: Default -0.40 (negative = wrong-way)
+- **Distance-to-default scaling**: Quadratic multiplier (max 0.5x)
 
 #### Operational Risk Parameters
 
@@ -166,7 +354,7 @@ $$
 - **No model selection**: GARCH(1,1) and Lognormal-GPD are hardcoded choices; alternative specifications (e.g., EGARCH, Student-t severity) not automated.
 - **Threshold sensitivity**: OpRisk GPD results sensitive to threshold choice; no automated threshold optimization.
 - **Insurance mitigation**: Pro-rata scaling applied when aggregate limits bind; more sophisticated risk transfer modeling (e.g., layer optimization) not implemented.
-- **Credit risk simplifications**: No dynamic volatility term structure or stochastic LGD/PD; exposure engine uses stylised (linear + quadratic) revaluation functions without a full pricing library; Wrong-Way Risk is modelled via simple heuristic scaling rather than a structural joint simulation of exposure and default probability.
+- **Credit risk simplifications**: No path-dependent exotic derivatives; CSA logic simplified (bilateral vs. unilateral not distinguished), parameters use defaults or config files; no automated MLE/Bayesian calibration to market data for credit parameters.
 - **No variance reduction techniques**: Monte Carlo simulations use raw sampling without antithetic variates, control variates, importance sampling, or quasi-Monte Carlo methods.
 
 ## 6. References & Standards
@@ -184,6 +372,10 @@ $$
 - Glasserman, P. (2003). *Monte Carlo Methods in Financial Engineering*. Springer.
 - Chavez-Demoulin, V., Embrechts, P., Nešlehová, J. (2006). Quantitative models for operational risk: extremes, dependence and aggregation. *Journal of Banking & Finance*, 30(10), 2635–2658.
 - Gregory, J. (2012). *Counterparty Credit Risk and Credit Value Adjustment*. Wiley Finance.
+- Black, F., Scholes, M. (1973). The Pricing of Options and Corporate Liabilities. *Journal of Political Economy*, 81(3), 637–654.
+- Merton, R.C. (1974). On the Pricing of Corporate Debt: The Risk Structure of Interest Rates. *Journal of Finance*, 29(2), 449–470.
+- Vasicek, O. (1987). Probability of Loss on Loan Portfolio. *KMV Corporation*.
+- Pykhtin, M., Zhu, S. (2007). A Guide to Modeling Counterparty Credit Risk. *GARP Risk Review*, July/August.
 
 ### Implementation Standards
 

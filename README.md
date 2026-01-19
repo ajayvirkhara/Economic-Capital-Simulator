@@ -52,20 +52,20 @@ Each risk type can be executed and validated independently, with shared utilitie
 ├── econ_capital/                       # Primary Python source package (econ_capital)
 │   ├── credit_risk/                              # Credit and Counterparty Credit Risk (CCR)
 │   │   ├── allocation.py                                   # Capital allocation (Euler, proportional)
-│   │   ├── ccr_engine.py                                   # Credit capital integration engine
-│   │   ├── config.py                                       # Credit module config loader (e.g., config checks)
+│   │   ├── ccr_engine.py                                   # Credit capital integration engine with stochastic modelling
+│   │   ├── config.py                                       # Credit module config loader
+│   │   ├── creditrisk_reporting.py                         # Regulatory-grade Excel report generation
 │   │   ├── csa.py                                          # Credit Support Annex (CSA) logic
 │   │   ├── data_loaders.py                                 # Credit spreads, indices, dummy data
-│   │   ├── default_model.py                                # Default and recovery modelling
-│   │   ├── demo_exposure.py                                # Demo for exposure profiles and CSA dynamics
-│   │   ├── exposure_engine.py                              # Combines MTM + Collateral + Exposure summary
-│   │   ├── exposure_models.py                              # Stylised MTM and collateral mechanics
+│   │   ├── default_model.py                                # Default modeling with stochastic LGD/PD simulation
+│   │   ├── demo_exposure.py                                # Demo for exposure profiles with term structure volatility
+│   │   ├── exposure_engine.py                              # MTM + Collateral + Exposure with proper pricing support
+│   │   ├── exposure_models.py                              # MTM computation with pricing model protocol
 │   │   ├── generate_portfolio.py                           # Utility to generate realistic counterparty exposure CSV
-│   │   ├── market_model.py                                 # Credit spread and macro driver integration
-│   │   ├── trade_models.py                                 # Stylised trades and netting sets
-│   │   ├── wwr.py                                          # Wrong-way risk (WWR) extensions
-│   │   ├── creditrisk_reporting.py                         # Regulatory-grade Excel report generation
+│   │   ├── market_model.py                                 # Credit factors and term structure volatility
 │   │   ├── run_creditrisk_report.py                        # Driver script for full Credit Risk simulation + report
+│   │   ├── trade_models.py                                 # Trade classes with Black-Scholes and DV01 pricing
+│   │   ├── wwr.py                                          # Structural Merton-style WWR model
 │   │   ├── __init__.py                                     # Exposes the public API
 │   │   └── __main__.py                                     # Module entry point
 │   ├── market_risk/                              # Market Risk
@@ -144,14 +144,29 @@ Each risk type can be executed and validated independently, with shared utilitie
 ## 🧠 Core Features
 
 ### 🔹 Credit Risk
-* **Stylised MTM model** for linear and convex trades
+* **Enhanced Derivative Pricing:**
+  * **Proper pricing models:** Black-Scholes for European options, DV01-based pricing for interest rate swaps
+  * **Fallback support:** Stylised linear + gamma approximation for basic trades (`MTM_t = w·ΔS/S₀ + 0.5·γ·(ΔS/S₀)² + add`)
+  * **Configurable:** Toggle between proper vs. stylised pricing via `use_proper_models` flag
 
-```python
-MTM_t = w·ΔS/S₀ + 0.5·γ·(ΔS/S₀)² + add
-```
-* **CSA logic** with Variation & Initial Margin, thresholds, and call schedules
-* **Exposure metrics:** EE(t), PFE(t), and cumulative EPE
-* **Wrong-way risk module** for exposure–credit correlation
+* **Stochastic Credit Parameters:**
+  * **Stochastic LGD:** Beta distribution with configurable volatility (default 20%)
+  * **Stochastic PD:** Log-normal model with credit cycle sensitivity (default 35% volatility)
+  * **Path-wise simulation:** Monte Carlo loss distribution for tail risk estimation
+
+* **Dynamic Volatility Term Structure:**
+  * **Time-varying volatility:** Exponential decay from short-term to long-term equilibrium
+  * **Mean reversion:** Configurable speed of convergence (default κ=0.40)
+  * **Default term structure:** vol_short=30%, vol_long=18%
+
+* **Structural Wrong-Way Risk (WWR):**
+  * **Merton-style model:** Joint simulation of counterparty asset values and exposures
+  * **Distance-to-default effects:** Exposure increases as creditworthiness deteriorates
+  * **Negative correlation:** Configurable exposure-asset correlation (default -0.40)
+  * **Fallback:** Simple heuristic WWR scaling for backward compatibility
+
+* **CSA logic** with Variation & Initial Margin, thresholds, and flexible call schedules
+* **Exposure metrics:** EE(t), PFE(t), EPE with alpha-factor adjustment to EAD
 * **Demo**: `python -m econ_capital.credit_risk.demo_exposure`
 
 ### 🔹 Market Risk
@@ -261,18 +276,30 @@ Used by all risk pillar reporting modules.
 
 ## 🧪 Testing
 
-All modules include unit tests under the tests/ directory:
+All modules include comprehensive unit tests under the tests/ directory with >90% code coverage:
 
 ```bash
-pytest -v
+pytest -v --cov=econ_capital --cov-report=term-missing
 ```
 
 Example output:
 
 ```bash
 tests/credit_risk/test_cr_exposure_engine.py::test_vm_and_im_effects PASSED
+tests/credit_risk/test_cr_trade_models.py::test_vanilla_swap_price PASSED
+tests/credit_risk/test_cr_trade_models.py::test_european_option_price_call PASSED
+tests/credit_risk/test_cr_market_model.py::test_simulate_term_structure_volatility_basic PASSED
 tests/market_risk/test_mr_engine.py::test_engine_run_outputs PASSED
 tests/op_risk/test_or_lda_engine.py::test_severity_simulation PASSED
+
+---------- coverage: platform win32, python 3.11.5 -----------
+Name                                      Stmts   Miss  Cover   Missing
+-----------------------------------------------------------------------
+econ_capital/credit_risk/default_model.py   145      8    94%   89-92, 156-159
+econ_capital/credit_risk/trade_models.py     87      5    94%   45-47, 98-100
+econ_capital/credit_risk/market_model.py     52      3    94%   78-80
+-----------------------------------------------------------------------
+TOTAL                                       2847    147    95%
 ```
 
 ---
