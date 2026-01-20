@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Dict
 import pandas as pd
+import numpy as np
 import yfinance as yf
 
 from .config import load_market_yaml, resolve_tickers
@@ -119,5 +120,68 @@ def load_dummy_positions(
     return df.fillna(0.0)
 
 
+def load_historical_returns(
+    tickers: list[str],
+    start_date: str = "2020-01-01",
+    end_date: str = None,
+    source: str = "yahoo",
+) -> pd.DataFrame:
+    """
+    Load historical returns for factor universe.
+
+    Parameters
+    ----------
+    tickers : list[str]
+        Risk factor tickers (e.g., ['SPY', 'TLT', 'GLD'])
+    start_date : str
+        Start date in 'YYYY-MM-DD' format
+    end_date : str, optional
+        End date (default: today)
+    source : str
+        Data source: 'yahoo' or 'fred'
+
+    Returns
+    -------
+    returns : pd.DataFrame
+        Daily log returns, columns = tickers
+    """
+    import yfinance as yf
+    from datetime import datetime
+
+    if end_date is None:
+        end_date = datetime.today().strftime("%Y-%m-%d")
+
+    if source == "yahoo":
+        # Download adjusted close prices
+        data = yf.download(tickers, start=start_date, end=end_date, progress=False)
+        prices = data["Adj Close"]
+
+        # Compute log returns
+        returns = np.log(prices / prices.shift(1)).dropna()
+
+        return returns
+
+    elif source == "fred":
+        # Use pandas_datareader for FRED data
+        from pandas_datareader import data as web
+
+        dfs = []
+        for ticker in tickers:
+            try:
+                df = web.DataReader(ticker, "fred", start_date, end_date)
+                dfs.append(df)
+            except Exception as e:
+                print(f"Failed to load {ticker}: {e}")
+
+        prices = pd.concat(dfs, axis=1)
+        prices.columns = tickers
+        returns = np.log(prices / prices.shift(1)).dropna()
+
+        return returns
+
+    else:
+        raise ValueError(f"Unknown source: {source}")
+
+
 # Exported symbols
-__all__ = ["load_real_risk_factors", "load_dummy_positions"]
+__all__ = ["load_real_risk_factors", "load_dummy_positions", "load_historical_returns"]

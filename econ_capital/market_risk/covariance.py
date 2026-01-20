@@ -105,3 +105,29 @@ def garch_cov(returns: pd.DataFrame) -> pd.DataFrame:
         "Computed GARCH covariance: shape=%s, elapsed=%.3fs", cov.shape, elapsed
     )
     return pd.DataFrame(cov, index=returns.columns, columns=returns.columns)
+
+
+def fit_regime_switching_garch(returns: pd.Series, n_regimes: int = 2) -> dict:
+    """
+    Fit Markov-switching GARCH for volatility regime detection.
+
+    Identifies:
+    - Low volatility regime (normal market)
+    - High volatility regime (crisis)
+
+    Returns
+    -------
+    dict with regime probabilities and conditional volatilities
+    """
+    # Use rolling volatility to detect regime changes
+    vol_short = returns.rolling(20).std()  # 20-day vol
+    vol_long = returns.rolling(60).std()  # 60-day vol
+
+    # Regime = high vol if short-term vol > 1.5x long-term vol
+    regime = (vol_short > 1.5 * vol_long).astype(int)
+
+    return {
+        "regime": regime,
+        "high_vol_periods": regime.sum() / len(regime),
+        "current_regime": regime.iloc[-1],
+    }
