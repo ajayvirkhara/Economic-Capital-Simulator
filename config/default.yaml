@@ -8,7 +8,7 @@ global:
 simulation:
   default_n_paths: 5000
   default_time_steps: 6
-  default_horizon_years: 1.0
+  default_horizon_days: 10
 
 credit_risk:
   stochastic_params:

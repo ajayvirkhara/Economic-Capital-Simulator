@@ -28,6 +28,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "LQD": 0.005,  # +50 bps spread widening
     },
     "stress_enabled": True,
+    "use_full_revaluation": True,
+    "use_historical_var": False,
+    "compute_covar":True,
+    "historical_lookback_days": 252,
 }
 
 # -------------------------------
