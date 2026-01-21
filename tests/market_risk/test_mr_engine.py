@@ -27,7 +27,7 @@ def dummy_engine():
     )
 
     engine = MarketRiskEconomicCapital(
-        risk_factors=rf, positions=pos, config={"n_paths": 1000, "seed": 42}
+        risk_factors=rf, positions=pos, config={"n_paths": 1000, "seed": 42, "use_full_revaluation": False}
     )
     return engine
 
@@ -161,6 +161,8 @@ def test_stress_testing_returns_stressed_capital():
         "horizon_days": 10,
         "scaling_days_year": 252,
         "df_t": 3.0,
+        "use_full_revaluation": False,  # Disable full revaluation for simple delta test
+        "stress_enabled": True,  # Explicitly enable stress testing
         "stress_shocks": {
             "SPY": -0.40,  # Expect negative P&L if long equity
             "TLT": 0.02,  # Positive shock (duration negative → loss if long bonds)
