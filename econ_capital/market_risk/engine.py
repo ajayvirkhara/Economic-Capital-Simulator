@@ -24,6 +24,7 @@ from .config import DEFAULT_CONFIG, load_market_yaml
 from .covariance import ewma_cov, sample_cov, garch_cov
 from .shocks import mv_t_draws
 from .stats import left_tail_var, left_tail_es, compute_covar
+from .data_loaders import load_dummy_positions, convert_positions_to_dict
 
 logger = setup_logging(__name__)
 
@@ -34,7 +35,7 @@ class MarketRiskEconomicCapital:
     def __init__(
         self,
         risk_factors: pd.DataFrame,
-        positions: pd.DataFrame,
+        positions: Optional[pd.DataFrame] = None,
         config: Optional[Dict[str, Any]] = None,
         pricing_portfolio=None,
     ):
@@ -71,7 +72,13 @@ class MarketRiskEconomicCapital:
 
         # Store inputs
         self.risk_factors = risk_factors
-        self.positions = positions
+        self.exposure_df = (
+            positions if positions is not None else load_dummy_positions()
+        )
+
+        # Factor names from risk_factors
+        self.factor_names = list(self.risk_factors.columns)
+        self.n_factors = len(self.factor_names)
 
         # Extract key simulation parameters with fallbacks
         sim = self.config.get("simulation", {})
@@ -89,22 +96,34 @@ class MarketRiskEconomicCapital:
         # Create RNG using the final seed
         self.rng = np.random.default_rng(self.seed)
 
-        # Cache factor names and number of factors
-        self.factor_names = list(self.risk_factors.columns) 
-        self.n_factors = len(self.factor_names)
+        # Decide positions format based on mode
+        if self.use_full_revaluation:
+            # Convert exposure matrix → rich dict for full reval
+            current_levels = self._get_current_market_levels()
+            self.positions = convert_positions_to_dict(
+                self.exposure_df, current_levels=current_levels
+            )
+            self.position_names = list(self.positions.keys())
+            logger.info(
+                "Using full revaluation: converted %d positions to dict format",
+                len(self.positions),
+            )
+        else:
+            # Keep DataFrame for delta-gamma
+            self.positions = self.exposure_df
+            self.position_names = self.positions.index.tolist()
 
-        # Build exposures matrices aligned to factor order
+        # Build delta/gamma/vega matrices (still needed for delta-gamma and some breakdowns)
         self.delta, self.gamma, self.vega = self._build_exposures()
 
-        # Handle pricing portfolio
+        # Pricing portfolio for full reval
         if self.use_full_revaluation:
             if pricing_portfolio is None:
-                # Auto-build from positions
                 self.pricing_portfolio = self._build_pricing_portfolio()
             else:
                 self.pricing_portfolio = pricing_portfolio
         else:
-            self.pricing_portfolio = pricing_portfolio
+            self.pricing_portfolio = None
 
         # Log initialization timing for reproducibility and performance tracking
         elapsed = time.perf_counter() - t0
@@ -134,40 +153,40 @@ class MarketRiskEconomicCapital:
 
             # 1. Equities
             if p_type == "equity":
-                portfolio.add_position(
-                    EquityPosition(
-                        quantity=pos_data["quantity"],
-                        current_price=pos_data["price"],
-                        underlying_factor=pos_data["factor"],
-                    )
+                pos = EquityPosition(
+                    quantity=pos_data["quantity"],
+                    current_price=pos_data["price"],
+                    underlying_factor=pos_data["factor"],
                 )
+                pos.position_name = name
+                portfolio.add_position(pos)
 
             # 2. Bonds (Fixed Income)
             elif p_type == "bond":
-                portfolio.add_position(
-                    BondPosition(
-                        notional=pos_data["notional"],
-                        current_price=pos_data["price"],
-                        modified_duration=pos_data["duration"],
-                        convexity=pos_data.get("convexity", 0.0),
-                        yield_factor=pos_data["factor"],
-                        current_yield=pos_data["yield"],
-                    )
+                pos = BondPosition(
+                    notional=pos_data["notional"],
+                    current_price=pos_data["price"],
+                    modified_duration=pos_data["duration"],
+                    convexity=pos_data.get("convexity", 0.0),
+                    yield_factor=pos_data["factor"],
+                    current_yield=pos_data["yield"],
                 )
+                pos.position_name = name
+                portfolio.add_position(pos)
 
             # 3. FX Forwards
             elif p_type == "fxforward":
-                portfolio.add_position(
-                    FXForward(
-                        notional=pos_data["notional"],
-                        strike=pos_data["strike"],
-                        maturity=pos_data["maturity"],
-                        fx_spot_factor=pos_data["factor"],
-                        domestic_rate=pos_data.get("r_dom", 0.02),
-                        foreign_rate=pos_data.get("r_for", 0.01),
-                        current_spot=pos_data["spot"],
-                    )
+                pos = FXForward(
+                    notional=pos_data["notional"],
+                    strike=pos_data["strike"],
+                    maturity=pos_data["maturity"],
+                    fx_spot_factor=pos_data["factor"],
+                    domestic_rate=pos_data.get("r_dom", 0.02),
+                    foreign_rate=pos_data.get("r_for", 0.01),
+                    current_spot=pos_data["spot"],
                 )
+                pos.position_name = name
+                portfolio.add_position(pos)
 
             # 4. European Options
             elif p_type == "option":
@@ -180,56 +199,80 @@ class MarketRiskEconomicCapital:
                     underlying_factor=pos_data["factor"],
                     risk_free_rate=pos_data.get("rf", 0.02),
                 )
-                opt.current_spot = pos_data["spot"]  # Setting required attribute
+                opt.current_spot = pos_data["spot"]
+                opt.position_name = name
                 portfolio.add_position(opt)
 
             # 5. Interest Rate Swaps
             elif p_type == "swap":
-                portfolio.add_position(
-                    InterestRateSwap(
-                        notional=pos_data["notional"],
-                        fixed_rate=pos_data["fixed_rate"],
-                        tenor_years=pos_data["tenor"],
-                        rate_factor=pos_data["factor"],
-                        current_rate=pos_data["rate"],
-                    )
+                pos = InterestRateSwap(
+                    notional=pos_data["notional"],
+                    fixed_rate=pos_data["fixed_rate"],
+                    tenor_years=pos_data["tenor"],
+                    rate_factor=pos_data["factor"],
+                    current_rate=pos_data["rate"],
                 )
+                pos.position_name = name
+                portfolio.add_position(pos)
 
             # 6. Fallback to Linear Revaluation
             else:
-                # Fallback uses EquityPosition for a simple linear ΔP = Q * ΔS
-                portfolio.add_position(
-                    EquityPosition(
-                        quantity=pos_data.get("quantity", 1.0),
-                        current_price=pos_data.get("price", 100.0),
-                        underlying_factor=pos_data.get("factor", "UNKNOWN"),
-                    )
+                pos = EquityPosition(
+                    quantity=pos_data.get("quantity", 1.0),
+                    current_price=pos_data.get("price", 100.0),
+                    underlying_factor=pos_data.get("factor", "UNKNOWN"),
                 )
+                pos.position_name = name
+                portfolio.add_position(pos)
 
         return portfolio
 
     def _build_exposures(self) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        """Align delta/gamma/vega columns to factor order (missing → 0)."""
+        """
+        Build delta/gamma/vega matrices ONLY if using delta-gamma approximation.
+        In full-revaluation mode, return empty/zero matrices (they aren't used).
+        """
+        if self.use_full_revaluation:
+            # Full revaluation doesn't use these matrices → return zeros/empty
+            logger.debug(
+                "Full revaluation mode: skipping delta/gamma/vega matrix construction"
+            )
+            zero_delta = pd.DataFrame(
+                0.0, index=self.position_names, columns=self.factor_names
+            )
+            zero_gamma = pd.DataFrame(
+                0.0, index=self.position_names, columns=self.factor_names
+            )
+            zero_vega = pd.DataFrame(
+                0.0, index=self.position_names, columns=self.factor_names
+            )
+            return zero_delta, zero_gamma, zero_vega
 
-        # Log/debug matrix alignment to ensure deltas, gammas, vegas are correctly reshaped
+        # Delta-gamma mode: build from exposure DataFrame
+        if not isinstance(self.positions, pd.DataFrame):
+            raise ValueError(
+                "self.positions must be a DataFrame in delta-gamma mode. "
+                "This should not happen — check __init__ logic."
+            )
+
         t0 = time.perf_counter()
 
         # Linear (delta)
-        delta = self.positions.reindex(columns=self.factor_names).fillna(0.0)
+        delta = self.positions.reindex(columns=self.factor_names, fill_value=0.0)
 
-        # Quadratic (gamma)
+        # Quadratic (gamma) — your dummy data has no gamma, so zero
         gamma_cols = [f"gamma_{f}" for f in self.factor_names]
-        gamma = self.positions.reindex(columns=gamma_cols).fillna(0.0).copy()
-        gamma.columns = self.factor_names  # rename back to factor names
+        gamma = self.positions.reindex(columns=gamma_cols, fill_value=0.0).copy()
+        gamma.columns = self.factor_names  # rename back
 
-        # Vega
+        # Vega — same, zero in dummy
         vega_cols = [f"vega_{f}" for f in self.factor_names]
-        vega = self.positions.reindex(columns=vega_cols).fillna(0.0).copy()
+        vega = self.positions.reindex(columns=vega_cols, fill_value=0.0).copy()
         vega.columns = self.factor_names
 
         elapsed = time.perf_counter() - t0
         logger.debug(
-            "Built exposures: delta=%s gamma=%s vega=%s elapsed=%.3fs",
+            "Built exposures (delta-gamma): delta=%s gamma=%s vega=%s elapsed=%.3fs",
             delta.shape,
             gamma.shape,
             vega.shape,
@@ -398,7 +441,7 @@ class MarketRiskEconomicCapital:
             logger.info("Using delta-gamma approximation")
             pnl_port, pnl_by_pos = self._pnl_from_shocks(shocks)
 
-        # Store for CoVaR computation
+        # Store position-level and portfolio PnL for CoVaR computation
         self.pnl_port = pnl_port
         self.pnl_by_pos = pnl_by_pos
 
@@ -416,20 +459,11 @@ class MarketRiskEconomicCapital:
         tail_mask = pnl_port <= cutoff
 
         # ──────────────────────────────────────────────────────────────
-        # Euler-style component ES — linear (delta) approximation
-        # Average contribution of each position in the tail scenarios
+        # Euler allocation using position P&L
         # ──────────────────────────────────────────────────────────────
 
-        # Factor-level contribution (10-day average tail impact per factor)
-        tail_shocks = shocks[tail_mask, :]  # (n_tail, n_factors)
-
-        # Compute position-level P&L in tail scenarios (linear term only)
-        tail_position_pnl = np.dot(
-            tail_shocks, self.delta.to_numpy().T
-        )  # shape (n_tail, n_positions)
-
-        # Average loss contribution per position in the tail
-        component_es = -tail_position_pnl.mean(axis=0)  # shape (n_positions,)
+        pnl_positions_df = pd.DataFrame(pnl_by_pos)  # Convert dict to DataFrame
+        component_es = -pnl_positions_df[tail_mask].mean(axis=0)  # Mean tail loss
 
         # Create series with correct index
         capital_breakdown = pd.Series(
@@ -551,10 +585,38 @@ class MarketRiskEconomicCapital:
 
         # Apply shocks to get shocked market levels
         market_shocks = {}
+
         for i, factor in enumerate(self.factor_names):
             current_level = current_market[factor]
-            shocked_levels = current_level * (1 + shocks[:, i])
-            market_shocks[factor] = shocked_levels
+
+            # Rates/bonds: use yield shocks
+            if factor in ["TLT", "LQD", "HYG"]:
+                # Get position metadata to extract duration
+                bond_pos = None
+                for pos in self.pricing_portfolio.positions:
+                    if hasattr(pos, "yield_factor") and pos.yield_factor == factor:
+                        bond_pos = pos
+                        break
+                if bond_pos is not None:
+                    # Current yield (from position)
+                    current_yield = bond_pos.current_yield
+                    current_yield = bond_pos.current_yield
+
+                    # Approximate: ΔP/P ≈ -Duration × Δy
+                    # Therefore: Δy ≈ -(ΔP/P) / Duration
+                    price_return = shocks[:, i]  # e.g., -0.03 = -3% price drop
+                    yield_change = -price_return / bond_pos.modified_duration
+
+                    shocked_yields = current_yield + yield_change
+                    market_shocks[factor] = shocked_yields
+                else:
+                    # Fallback: treat as equity
+                    market_shocks[factor] = current_level * (1 + shocks[:, i])
+
+            else:
+                # Equity/FX/Commodities: use multiplicative price shocks
+                shocked_levels = current_level * (1 + shocks[:, i])
+                market_shocks[factor] = shocked_levels
 
         # Revalue portfolio
         pnl_port = self.pricing_portfolio.revalue_all(market_shocks)
@@ -563,14 +625,36 @@ class MarketRiskEconomicCapital:
         pnl_by_pos = {}
         for pos in self.pricing_portfolio.positions:
             # Use underlying_factor or a position name attribute
-            pos_name = getattr(pos, "underlying_factor", "UNKNOWN")
+            pos_name = getattr(pos, "position_name", "UNKNOWN")
 
-            # Create single-position portfolio
+            # Revalue individual positions
             if hasattr(pos, "underlying_factor"):
                 factor = pos.underlying_factor
                 if factor in market_shocks:
                     pos_pnl = pos.revalue(market_shocks[factor])
                     pnl_by_pos[pos_name] = pos_pnl
+            elif hasattr(pos, "yield_factor"):
+                factor = pos.yield_factor
+                if factor in market_shocks:
+                    pos_pnl = pos.revalue(market_shocks[factor])
+                    pnl_by_pos[pos_name] = pos_pnl
+
+        logger.info(
+            "Portfolio P&L mean: %.2e  std: %.2e  min: %.2e  max: %.2e",
+            pnl_port.mean(),
+            pnl_port.std(),
+            pnl_port.min(),
+            pnl_port.max(),
+        )
+
+        # Print position-level PnLs
+        for pos_name, pos_pnl in pnl_by_pos.items():
+            logger.info(
+                "Position %s - P&L mean: %.2e  std: %.2e",
+                pos_name,
+                pos_pnl.mean(),
+                pos_pnl.std(),
+            )
 
         return pnl_port, pnl_by_pos
 
