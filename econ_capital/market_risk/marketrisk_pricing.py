@@ -63,6 +63,7 @@ class BondPosition:
     convexity: float  # Years² (e.g., 35.0)
     yield_factor: str  # e.g., 'USD10Y'
     current_yield: float  # Current yield in decimal (e.g., 0.03 = 3%)
+    position_name: str = None
 
     def revalue(self, shocked_yields: np.ndarray) -> np.ndarray:
         """
