@@ -101,7 +101,7 @@ def test_european_option_price_call():
     prices = option.price(market_data, time_idx)
     assert prices.shape == (2,)
 
-    expected_prices = np.array([14, 8.15]) # Approximate
+    expected_prices = np.array([14, 8.15])  # Approximate
     np.testing.assert_allclose(prices, expected_prices, atol=0.1)
 
 
