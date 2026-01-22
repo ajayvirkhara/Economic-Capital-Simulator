@@ -11,6 +11,7 @@ from typing import Dict
 import pandas as pd
 import numpy as np
 import yfinance as yf
+from typing import Any, Optional
 
 from .config import load_market_yaml, resolve_tickers
 
@@ -52,6 +53,12 @@ def load_real_risk_factors(
         data["Adj Close"].dropna() if "Adj Close" in data else data["Close"].dropna()
     )
     returns = prices.pct_change().dropna()
+
+    # Confirm data
+    print(f"Loaded returns shape: {returns.shape}")
+    print(returns.tail(5))
+    print(f"Returns std: {returns.std()}")
+
     returns.columns = list(selected.keys())
     return returns
 
@@ -60,7 +67,8 @@ def load_dummy_positions(
     positions: Dict[str, Dict[str, float]] | None = None,
 ) -> pd.DataFrame:
     """
-    Construct a dummy portfolio with exposures across equities, credit, commodities, and FX.
+    Returns a dictionary of positions in the format expected by the advanced
+    _build_pricing_portfolio() method (supports equity, bond, etc.).
 
     Priority order for positions:
         1. Explicit `positions` argument (highest priority)
@@ -102,16 +110,16 @@ def load_dummy_positions(
     df["TLT"] = [
         0,
         0,
-        -1_000_000_000,
+        -100_000_000,
         0,
         0,
         0,
         0,
         0,
         0,
-    ]  # Rates (long-duration): £1B equiv DV01 scaled
-    df["LQD"] = [0, 0, 0, -250_000_000, 0, 0, 0, 0, 0]  # IG Credit bonds: £250M
-    df["HYG"] = [0, 0, 0, 0, -400_000_000, 0, 0, 0, 0]  # HY Credit: £400M
+    ]  # Rates (short-duration): £1B equiv DV01 scaled
+    df["LQD"] = [0, 0, 0, -50_000_000, 0, 0, 0, 0, 0]  # IG Credit bonds: £250M
+    df["HYG"] = [0, 0, 0, 0, -75_000_000, 0, 0, 0, 0]  # HY Credit bonds: £400M
     df["GLD"] = [0, 0, 0, 0, 0, 100_000_000, 0, 0, 0]  # Gold: £100M
     df["USO"] = [0, 0, 0, 0, 0, 0, 50_000_000, 0, 0]  # Oil: £50M
     df["EURUSD=X"] = [0, 0, 0, 0, 0, 0, 0, 250_000_000, 0]  # FX EURUSD: £250M
@@ -183,5 +191,100 @@ def load_historical_returns(
         raise ValueError(f"Unknown source: {source}")
 
 
+def convert_positions_to_dict(
+    exposure_df: pd.DataFrame,
+    current_levels: Optional[Dict[str, float]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Convert the exposure DataFrame (delta matrix) into a dict format
+    suitable for full revaluation pricing.
+
+    Infers instrument type and adds reasonable defaults for price/duration/etc.
+    """
+    if current_levels is None:
+        current_levels = {
+            "SPY": 580.0,
+            "EFA": 85.0,
+            "EEM": 45.0,
+            "TLT": 92.0,
+            "LQD": 108.0,
+            "HYG": 78.0,
+            "GLD": 240.0,
+            "USO": 70.0,
+            "EURUSD=X": 1.08,
+            "GBPUSD=X": 1.27,
+        }
+
+    pos_dict = {}
+
+    for pos_name in exposure_df.index:
+        row = exposure_df.loc[pos_name]
+        non_zero_factors = row[row != 0].index.tolist()
+
+        if not non_zero_factors:
+            continue  # skip zero-exposure positions
+
+        # Assume single-factor position
+        factor = non_zero_factors[0]
+        exposure = row[factor]
+
+        # Infer type and build metadata
+        if pos_name in ["Equity_US", "Equity_Developed", "Equity_EM", "Gold", "Oil"]:
+            pos_dict[pos_name] = {
+                "type": "equity",
+                "position_name": pos_name,
+                "quantity": abs(exposure) / current_levels.get(factor, 100.0),
+                "price": current_levels.get(factor, 100.0),
+                "factor": factor,
+            }
+
+        elif pos_name in ["Rates", "Credit_IG", "Credit_HY"]:
+            duration = (
+                16.5 if pos_name == "Rates" else 7.8 if pos_name == "Credit_IG" else 4.2
+            )
+            convexity = (
+                320.0
+                if pos_name == "Rates"
+                else 85.0
+                if pos_name == "Credit_IG"
+                else 45.0
+            )
+            yld = (
+                0.042
+                if pos_name == "Rates"
+                else 0.052
+                if pos_name == "Credit_IG"
+                else 0.078
+            )
+
+            pos_dict[pos_name] = {
+                "type": "bond",
+                "position_name": pos_name,
+                "notional": exposure,
+                "price": current_levels.get(factor, 100.0),
+                "duration": duration,
+                "convexity": convexity,
+                "factor": factor,
+                "yield": yld,
+            }
+
+        elif pos_name in ["FX_EURUSD", "FX_GBPUSD"]:
+            # Treat FX as linear for now
+            pos_dict[pos_name] = {
+                "type": "equity",
+                "position_name": pos_name,
+                "quantity": abs(exposure) / current_levels.get(factor, 1.0),
+                "price": current_levels.get(factor, 1.0),
+                "factor": factor,
+            }
+
+    return pos_dict
+
+
 # Exported symbols
-__all__ = ["load_real_risk_factors", "load_dummy_positions", "load_historical_returns"]
+__all__ = [
+    "load_real_risk_factors",
+    "load_dummy_positions",
+    "load_historical_returns",
+    "convert_positions_to_dict",
+]
