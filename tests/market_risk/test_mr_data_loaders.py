@@ -132,7 +132,7 @@ def test_load_dummy_positions_hardcoded_defaults():
 
     assert "SPY" in df.columns
     assert df.loc["Equity_US", "SPY"] == 250_000_000
-    assert df.loc["Rates", "TLT"] == -1_000_000_000
+    assert df.loc["Rates", "TLT"] == -100_000_000
     assert df.shape == (9, 9)  # From the hardcoded idx and columns
 
 
