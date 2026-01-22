@@ -27,7 +27,9 @@ def dummy_engine():
     )
 
     engine = MarketRiskEconomicCapital(
-        risk_factors=rf, positions=pos, config={"n_paths": 1000, "seed": 42, "use_full_revaluation": False}
+        risk_factors=rf,
+        positions=pos,
+        config={"n_paths": 1000, "seed": 42, "use_full_revaluation": False},
     )
     return engine
 
@@ -303,6 +305,7 @@ def test_pnl_from_shocks_full_revaluation_logic(complex_engine):
     # Mock individual positions with factor attributes
     pos1 = MagicMock(underlying_factor="SPY")
     pos1.revalue.return_value = np.array([10.0])
+    pos1.position_name = "SPY"
 
     complex_engine.pricing_portfolio = mock_portfolio
     complex_engine.pricing_portfolio.positions = [pos1]
