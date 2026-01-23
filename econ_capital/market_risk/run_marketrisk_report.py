@@ -7,6 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 import yaml
+import pandas as pd
 
 from econ_capital.market_risk.data_loaders import (
     load_real_risk_factors,
@@ -57,8 +58,8 @@ def main() -> dict:
     # ──────────────────────────────────────────────────────────────
     print("\nLoading data...")
     risk_factors = load_real_risk_factors(
-        start=config.get("start_date", "2020-01-01"),
-        end=config.get("end_date", "2025-01-01"),
+        start=config.get("start_date", "2021-01-01"),
+        end=config.get("end_date", "2026-01-01"),
     )
     positions = load_dummy_positions()
 
@@ -85,6 +86,19 @@ def main() -> dict:
 
         print("\nCapital Breakdown (Top 10):")
         print(results["capital_breakdown"].head(10).to_string())
+
+        # Printing CoVaR metrics
+        if "covar_metrics" in results and results["covar_metrics"]:
+            print("\n" + "=" * 60)
+            print("CoVaR SYSTEMIC RISK METRICS")
+            print("=" * 60)
+            covar_df = pd.DataFrame(results["covar_metrics"]).T
+            print(covar_df.to_string())
+            print("\nInterpretation:")
+            print("- CoVaR: Portfolio VaR conditional on position being stressed")
+            print("- ΔCoVaR: Incremental systemic contribution")
+            print("- Systemic %: ΔCoVaR as % of portfolio VaR")
+
     except Exception as e:
         print("Failed during simulation:", e)
         raise
