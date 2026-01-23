@@ -69,6 +69,7 @@ class FirmWideECReporter:
         self._create_risk_contributions_sheet(wb)
         self._create_marginal_waterfall_sheet(wb)
         self._create_detailed_market_sheet(wb)
+        self._create_market_risk_deep_dive_sheet(wb)
         self._create_detailed_credit_sheet(wb)
         self._create_detailed_oprisk_sheet(wb)
         self._create_correlation_matrix_sheet(wb)
@@ -845,6 +846,145 @@ class FirmWideECReporter:
         apply_clean_style(chart, "Economic Capital (£)")
 
         ws.add_chart(chart, "E2")
+        autofit_columns(ws)
+
+    def _create_market_risk_deep_dive_sheet(self, wb: Workbook):
+        """Comprehensive market risk metrics including CoVaR, full reval, stress tests."""
+        ws = wb.create_sheet("Market Risk Deep Dive", 5)
+
+        ws.protection.sheet = True
+        ws.protection.password = "ec_report"
+
+        ws["A1"] = "Market Risk - Advanced Metrics & Analysis"
+        ws["A1"].font = Font(size=16, bold=True, color=self.colors["header"])
+
+        # ========== SECTION 1: VaR/ES BREAKDOWN ==========
+        ws["A3"] = "1. VaR/ES Metrics"
+        ws["A3"].font = Font(size=14, bold=True, color=self.colors["header"])
+
+        metrics_data = [
+            ("10D VaR (99.9%)", self.market_details.get("var_10d_999", 0)),
+            ("10D ES (99.9%)", self.market_details.get("es_10d_999", 0)),
+            ("1Y VaR (99.9%)", self.market_details.get("var_1y_999", 0)),
+            ("1Y ES (99.9%)", self.market_details.get("es_1y_999", 0)),
+            ("Stressed VaR (1Y)", self.market_details.get("stressed_var_1y_999", 0)),
+            ("Stressed ES (1Y)", self.market_details.get("stressed_es_1y_999", 0)),
+        ]
+        for i, (label, value) in enumerate(metrics_data, 4):
+            ws.cell(i, 1, label).font = Font(bold=True)
+            cell = ws.cell(i, 2, value)
+            cell.number_format = "£#,##0"
+
+            # Highlight stressed metrics
+            if "Stressed" in label:
+                cell.fill = PatternFill("solid", fgColor="FFC7CE")
+
+        # ========== SECTION 2: COVAR METRICS ==========
+        covar_start = 11
+        ws.cell(covar_start, 1, "2. Systemic Risk (CoVaR)")
+        ws.cell(covar_start, 1).font = Font(
+            size=14, bold=True, color=self.colors["header"]
+        )
+
+        covar_metrics = self.market_details.get("covar_metrics", {})
+
+        if covar_metrics:
+            headers = ["Position", "ΔCoVaR (£)", "Systemic %"]
+            for c, h in enumerate(headers, 1):
+                cell = ws.cell(covar_start + 1, c, h)
+                cell.fill = PatternFill("solid", self.colors["table_header"])
+                cell.font = Font(bold=True)
+
+            covar_df = pd.DataFrame(covar_metrics).T
+            covar_df = covar_df.sort_values(
+                "delta_covar", key=abs, ascending=False
+            ).head(5)
+
+            for i, (pos, row) in enumerate(covar_df.iterrows(), covar_start + 2):
+                ws.cell(i, 1, pos)
+                ws.cell(i, 2, float(row["delta_covar"])).number_format = "£#,##0"
+                ws.cell(
+                    i, 3, float(row["systemic_contribution_pct"]) / 100
+                ).number_format = "0.00%"
+        else:
+            ws.cell(covar_start + 1, 1, "CoVaR analysis not available")
+            ws.cell(covar_start + 1, 1).font = Font(italic=True, color="999999")
+
+        # ========== SECTION 3: FULL REVALUATION INFO ==========
+        reval_start = covar_start + 8
+        ws.cell(reval_start, 1, "3. Valuation Method")
+        ws.cell(reval_start, 1).font = Font(
+            size=14, bold=True, color=self.colors["header"]
+        )
+
+        used_full_reval = self.market_details.get("used_full_revaluation", False)
+
+        if used_full_reval:
+            ws.cell(reval_start + 1, 1, "Pricing Method:")
+            ws.cell(reval_start + 1, 2, "Full Revaluation (Closed-Form)")
+            ws.cell(reval_start + 1, 2).font = Font(bold=True, color="008000")
+
+            ws.cell(reval_start + 2, 1, "Coverage:")
+            ws.cell(
+                reval_start + 2,
+                2,
+                "Equities (spot), Bonds (duration/convexity), FX, Options (Black-Scholes)",
+            )
+
+            ws.cell(reval_start + 3, 1, "Benefits:")
+            ws.cell(
+                reval_start + 3,
+                2,
+                "Captures non-linear risk, path dependency, and convexity effects",
+            )
+        else:
+            ws.cell(reval_start + 1, 1, "Pricing Method:")
+            ws.cell(reval_start + 1, 2, "Delta-Gamma Approximation")
+            ws.cell(reval_start + 1, 2).font = Font(bold=True, color="C00000")
+
+            ws.cell(reval_start + 2, 1, "Note:")
+            ws.cell(
+                reval_start + 2,
+                2,
+                "Linear approximation may underestimate risk for options and convex instruments",
+            )
+
+        # ========== SECTION 4: MODEL DIAGNOSTICS ==========
+        diag_start = reval_start + 6
+        ws.cell(diag_start, 1, "4. Model Diagnostics").font = Font(
+            size=14, bold=True, color=self.colors["header"]
+        )
+
+        has_hist_var = "historical_var_1y_999" in self.market_details
+
+        if has_hist_var:
+            hist_var = self.market_details["historical_var_1y_999"]
+            param_var = self.market_details.get("var_1y_999", 0)
+            if param_var > 0:
+                diff_pct = (hist_var - param_var) / param_var * 100
+                ws.cell(diag_start + 1, 1, "Historical vs Parametric 1Y VaR (99.9%):")
+                ws.cell(
+                    diag_start + 1, 2, f"{diff_pct:+.1f}%"
+                ).number_format = "0.00%;[Red]-0.00%"
+
+                if abs(diff_pct) < 10:
+                    status = "Well calibrated ✓"
+                    color = "008000"
+                else:
+                    status = "Review assumptions"
+                    color = "C00000"
+                ws.cell(diag_start + 2, 1, "Assessment:").font = Font(bold=True)
+                ws.cell(diag_start + 2, 2, status).font = Font(color=color, bold=True)
+        else:
+            # Fallback content when historical is off
+            ws.cell(diag_start + 1, 1, "Historical VaR comparison")
+            ws.cell(diag_start + 1, 2, "Not enabled (use_historical_var = False)")
+            ws.cell(diag_start + 1, 2).font = Font(italic=True, color="777777")
+
+            ws.cell(
+                diag_start + 3, 1, "→ Enable historical simulation for full diagnostics"
+            )
+
         autofit_columns(ws)
 
 
