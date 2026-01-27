@@ -40,3 +40,16 @@ def merge_with_global(config: Dict[str, Any]) -> Dict[str, Any]:
         merged["seed"] = GLOBAL_DEFAULTS["global"]["seed"]
 
     return merged
+
+
+def load_correlation_config() -> Dict[str, Any]:
+    """Load correlation-specific configuration."""
+    global_config = load_global_defaults()
+    return global_config.get(
+        "correlation",
+        {
+            "method": "static",
+            "rolling_window": 252,
+            "stress_multiplier": 1.5,
+        },
+    )

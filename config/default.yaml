@@ -25,3 +25,35 @@ credit_risk:
   
   pricing:
     use_proper_models: true      # Use Black-Scholes/DV01 vs stylized linear+gamma
+
+  # NEW SECTION in default.yaml:
+
+correlation:
+  # Method: "static", "rolling", "regime_switching"
+  method: "regime_switching"
+  
+  # Rolling window parameters
+  rolling_window: 252  # trading days
+  
+  # Regime switching parameters
+  stress_multiplier: 1.5  # vol_short / vol_long threshold
+  short_window: 20
+  long_window: 60
+  
+  # Regime-specific correlation matrices
+  regimes:
+    normal:
+      Market_Credit: 0.30
+      Market_OpRisk: 0.10
+      Credit_OpRisk: 0.20
+    
+    stress:
+      Market_Credit: 0.65  # Contagion effect
+      Market_OpRisk: 0.35
+      Credit_OpRisk: 0.45
+  
+  # Static fallback (if dynamic estimation fails)
+  static:
+    Market_Credit: 0.30
+    Market_OpRisk: 0.10
+    Credit_OpRisk: 0.20
