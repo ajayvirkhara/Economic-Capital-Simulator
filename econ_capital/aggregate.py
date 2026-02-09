@@ -56,12 +56,19 @@ def normalize_risk_results(
     credit_ul = credit.get(
         "UL_WWR_total", credit.get("UL_total", credit.get("UL", 0.0))
     )
-    credit_ec = credit_el + z * credit_ul
+
+    # Use EC directly from the Credit risk module
+    credit_ec_standalone = credit.get(
+        "EC_WWR_total", credit.get("EC_total", credit.get("EC", 0.0))
+    )
+    # If no EC provided, fall back to calculation
+    if credit_ec_standalone == 0.0:
+        credit_ec_standalone = credit_el + z * credit_ul
 
     normalized["Credit"] = {
         "EL": credit_el,
         "UL": credit_ul,
-        "Total_Standalone": credit_ec,
+        "Total_Standalone": credit_ec_standalone,
         "label": "Credit (WWR-adjusted)" if "EL_WWR_total" in credit else "Credit",
     }
 
@@ -88,37 +95,81 @@ def aggregate_economic_capital(
     copula_df: Optional[float] = None,  # If provided, use t-copula simulation
     n_sim: int = 500_000,
     seed: int = 42,
+    correlation_matrix: Optional[np.ndarray] = None,
+    correlation_regime: Optional[str] = None,
 ) -> Tuple[float, float, float, pd.Series, float]:
-    """
-    Aggregate risks with diversification using either:
-      - Gaussian copula (default, fast analytic)
-      - Student-t copula (fat-tailed, Monte Carlo)
+    r"""
+    Aggregates firm-wide Economic Capital across Market, Credit, and Operational risk.
+
+    Supports two methodologies:
+    1. Gaussian Copula (Analytic): Fast closed-form aggregation if `copula_df` is None.
+    2. Student-t Copula (Monte Carlo): Fat-tailed simulation if `copula_df` is provided.
+
+    Parameters
+    ----------
+    market_results, credit_results, op_results : dict
+        Risk module outputs containing EL, UL, and VaR/ES metrics.
+    confidence_level : float, default 0.999
+        Target quantile (alpha) for aggregation.
+    copula_df : float, optional
+        Degrees of freedom for Student-t copula (e.g., 3-5). Triggers Monte Carlo.
+    n_sim : int, default 500,000
+        Number of simulation paths for t-copula.
+    seed : int, default 42
+        Random seed for reproducibility.
+    correlation_matrix : np.ndarray (3, 3), optional
+        Custom inter-risk correlations. Overrides static internal defaults.
+    correlation_regime : str, optional
+        Regime label (e.g., "Normal", "Crisis") for audit and reporting.
 
     Returns
     -------
-    EL_total, UL_portfolio, EC_total, marginal_contributions, diversification_benefit
+    EL_total : float
+        Sum of individual risk Expected Losses.
+    UL_portfolio : float
+        Diversified Portfolio Unexpected Loss ($UL_{port} \leq \sum UL_{standalone}$).
+    EC_total : float
+        Total Economic Capital ($EL + Diversified\_UL$ or simulated quantile).
+    marginal_contributions : pd.Series
+        Risk-specific capital via Euler allocation ($E[L_i | L_p \geq VaR_\alpha]$).
+    diversification_benefit : float
+        Absolute capital saved: $\sum EC_{standalone} - EC_{total}$.
+
+    Notes
+    -----
+    **Dynamic Correlations**: If `correlation_matrix` is provided, the function
+    switches from static assumptions to regime-dependent modeling. This accounts
+    for "correlation breakdown" where risk dependencies spike during market stress.
     """
 
-    # Step 1: Normalize the raw inputs
+    # Normalize the raw inputs
     normalized = normalize_risk_results(
         market_results=market_results,
         credit_results=credit_results,
         op_results=op_results,
     )
 
-    # Step 2: Extract vectors from the normalized data
+    # Extract vectors from the normalized data
     risk_types = list(normalized.keys())
     el_vec = np.array([normalized[rt]["EL"] for rt in risk_types])
     ul_vec = np.array([normalized[rt]["UL"] for rt in risk_types])
 
     EL_total = el_vec.sum()
 
-    corr_matrix = np.array([[1.0, 0.3, 0.1], [0.3, 1.0, 0.2], [0.1, 0.2, 1.0]])
+    # Use static or dynamic correlations
+    if correlation_matrix is not None:
+        corr_matrix = correlation_matrix  # Dynamic corr matrix
+    else:
+        corr_matrix = np.array(
+            [[1.0, 0.3, 0.1], [0.3, 1.0, 0.2], [0.1, 0.2, 1.0]]
+        )  # Legacy static corrs
 
+    # Ensure order matches
     order = ["Market", "Credit", "OpRisk"]
     idx = [order.index(rt) for rt in risk_types]
     corr_matrix = corr_matrix[np.ix_(idx, idx)]
 
+    # Aggregation and calculations
     if copula_df is not None and copula_df > 2:
         # --- t-Copula Monte Carlo (fat-tailed joint simulation) ---
         rng = np.random.default_rng(seed)
@@ -135,14 +186,8 @@ def aggregate_economic_capital(
 
         EC_total = float(np.quantile(total_losses, confidence_level))
 
-        # Standalone EC using t-distribution (consistent with copula)
-        from scipy.stats import t
-
-        t_quantile = t.ppf(confidence_level, copula_df)
-        standalone_ec = sum(
-            normalized[rt]["EL"] + t_quantile * normalized[rt]["UL"]
-            for rt in risk_types
-        )
+        # Standalone EC using t-distribution
+        standalone_ec = sum(normalized[rt]["Total_Standalone"] for rt in risk_types)
         diversification_benefit = standalone_ec - EC_total
 
         # Marginal via simulation: average contribution in tail scenarios
