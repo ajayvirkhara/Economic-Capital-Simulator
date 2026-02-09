@@ -5,6 +5,7 @@ Supports: Regime-Switching and Rolling Windows
 
 from __future__ import annotations
 import pandas as pd
+import numpy as np
 from typing import Dict, Tuple, Optional, Literal
 from dataclasses import dataclass
 
@@ -27,7 +28,8 @@ class DynamicCorrelationEstimator:
     def __init__(
         self,
         method: Literal[
-            "rolling", "regime_switching",
+            "rolling",
+            "regime_switching",
         ] = "regime_switching",
         window: int = 252,
         stress_multiplier: float = 1.5,
