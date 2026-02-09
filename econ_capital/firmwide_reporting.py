@@ -10,6 +10,7 @@ from typing import Dict, Any
 from scipy.stats import t
 
 import pandas as pd
+import numpy as np
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, Reference
 from openpyxl.styles import Font, PatternFill, Alignment
@@ -60,6 +61,15 @@ class FirmWideECReporter:
                 )
                 self.copula_df = None
 
+        self.correlation_matrix = self.results.get("correlation_matrix_array")
+        self.correlation_regime = self.results.get("correlation_regime", "Static")
+
+        # Convert corr matrix to numpy array if stored as list
+        if self.correlation_matrix is not None and not isinstance(
+            self.correlation_matrix, np.ndarray
+        ):
+            self.correlation_matrix = np.array(self.correlation_matrix)
+
     def generate_report(self) -> Path:
         wb = Workbook()
         wb.remove(wb.active)
@@ -77,7 +87,7 @@ class FirmWideECReporter:
 
         wb.save(self.filename)
         wb.close()  # Added to prevent potential file corruption
-        print("\nFirm-wide Economic Capital report generated:")
+        print("\nDetailed firm-wide Economic Capital report generated:")
         print(f"   {self.filename}")
         return self.filename
 
@@ -725,49 +735,225 @@ class FirmWideECReporter:
         ws["A1"] = "Inter-Risk Correlation Matrix"
         ws["A1"].font = Font(size=16, bold=True, color=self.colors["header"])
 
-        risk_types = list(self.correlations.keys())
-        if not risk_types:
-            ws["A3"] = "No correlation data available."
-            return
+        # Display regime information
+        regime_info = self.correlations.get("regime", "Static")
+        method_info = self.correlations.get("method", "Static")
+
+        ws["A2"] = f"Regime: {regime_info} | Method: {method_info}"
+        ws["A2"].font = Font(size=12, italic=True, color="1F4E78")
+        ws.merge_cells("A2:D2")
+
+        # Extract matrix (handle both old dict format and new matrix format)
+        if "matrix" in self.correlations:
+            # New format: numpy array stored as list
+            corr_array = np.array(self.correlations["matrix"])
+            risk_types = ["Market", "Credit", "OpRisk"]
+        else:
+            # Old format: nested dicts
+            risk_types = list(self.correlations.keys())
+            if not risk_types:
+                ws["A3"] = "No correlation data available."
+                return
+
+            corr_array = np.array(
+                [
+                    [self.correlations.get(rt1, {}).get(rt2, 0.0) for rt2 in risk_types]
+                    for rt1 in risk_types
+                ]
+            )
+
+        # Correlation matrix
+        ws.cell(4, 1, "Current Correlation Matrix").font = Font(
+            size=14, bold=True, color=self.colors["header"]
+        )
 
         # Headers
-        ws.cell(3, 1, "Risk_Type").font = Font(color="FFFFFF", bold=True)
-        ws.cell(3, 1).fill = PatternFill("solid", self.colors["header"])
+        ws.cell(5, 1, "Risk Type").font = Font(color="FFFFFF", bold=True)
+        ws.cell(5, 1).fill = PatternFill("solid", self.colors["header"])
 
         for c, risk in enumerate(risk_types, 2):
-            cell = ws.cell(3, c, risk)
+            cell = ws.cell(5, c, risk)
             cell.fill = PatternFill("solid", self.colors["header"])
             cell.font = Font(color="FFFFFF", bold=True)
             cell.alignment = Alignment(horizontal="center")
 
         # Write data
-        for r, rt1 in enumerate(risk_types, 4):
+        for r, rt1 in enumerate(risk_types, 6):
             ws.cell(r, 1, str(rt1)).font = Font(bold=True)
             for c, rt2 in enumerate(risk_types, 2):
-                corr = float(self.correlations.get(rt1, {}).get(rt2, 0.0))
-                cell = ws.cell(r, c, corr)
+                corr_val = float(corr_array[r - 6, c - 2])
+                cell = ws.cell(r, c, corr_val)
                 cell.number_format = "0.00"
                 cell.alignment = Alignment(horizontal="center")
 
-        last_row = len(risk_types) + 3
+                # Conditional formatting: highlight high correlations
+                if r != c:  # Off-diagonal
+                    if abs(corr_val) > 0.5:
+                        cell.fill = PatternFill(
+                            "solid", fgColor="FFC7CE"
+                        )  # Red for high
+                    elif abs(corr_val) > 0.3:
+                        cell.fill = PatternFill(
+                            "solid", fgColor="FFEB9C"
+                        )  # Yellow for moderate
+
+        last_row = len(risk_types) + 5
         last_col = get_column_letter(len(risk_types) + 1)
 
-        # Use a unique ID and sanitised names
+        # Table for current matrix
         tab = Table(
             displayName=f"CorrMatrixTable_{self.timestamp}",
-            ref=f"A3:{last_col}{last_row}",
-            id=700,
+            ref=f"A5:{last_col}{last_row}",
         )
 
         tab.tableStyleInfo = TableStyleInfo(
             name="TableStyleMedium9", showRowStripes=True
         )
 
-        # Use a try-except block to ensure the script finishes even if Excel's XML engine is finicky
-        try:
-            ws.add_table(tab)
-        except Exception:
-            pass
+        ws.add_table(tab)
+
+        # === STATIC BASELINE COMPARISON (if dynamic was used) ===
+        if "static_fallback" in self.correlations:
+            comparison_start = last_row + 3
+
+            ws.cell(
+                comparison_start, 1, "Static Baseline (For Comparison)"
+            ).font = Font(size=14, bold=True, color="666666")
+
+            static_corrs = self.correlations["static_fallback"]
+
+            # Build static correlation array
+            static_array = np.array(
+                [
+                    [
+                        1.0,
+                        static_corrs.get("Market", {}).get("Credit", 0.3),
+                        static_corrs.get("Market", {}).get("OpRisk", 0.1),
+                    ],
+                    [
+                        static_corrs.get("Credit", {}).get("Market", 0.3),
+                        1.0,
+                        static_corrs.get("Credit", {}).get("OpRisk", 0.2),
+                    ],
+                    [
+                        static_corrs.get("OpRisk", {}).get("Market", 0.1),
+                        static_corrs.get("OpRisk", {}).get("Credit", 0.2),
+                        1.0,
+                    ],
+                ]
+            )
+
+            # Headers for static table
+            ws.cell(comparison_start + 1, 1, "Risk Type").font = Font(
+                bold=True, color="666666"
+            )
+            ws.cell(comparison_start + 1, 1).fill = PatternFill(
+                "solid", fgColor="E0E0E0"
+            )
+
+            for c, risk in enumerate(risk_types, 2):
+                cell = ws.cell(comparison_start + 1, c, risk)
+                cell.fill = PatternFill("solid", fgColor="E0E0E0")
+                cell.font = Font(bold=True, color="666666")
+                cell.alignment = Alignment(horizontal="center")
+
+            # Write static correlation data
+            for r, rt1 in enumerate(risk_types, comparison_start + 2):
+                ws.cell(r, 1, str(rt1)).font = Font(bold=True, color="666666")
+                for c, rt2 in enumerate(risk_types, 2):
+                    static_val = float(static_array[r - comparison_start - 2, c - 2])
+                    cell = ws.cell(r, c, static_val)
+                    cell.number_format = "0.00"
+                    cell.alignment = Alignment(horizontal="center")
+                    cell.font = Font(color="666666")
+
+            static_last_row = len(risk_types) + comparison_start + 1
+
+            # Table for static matrix
+            static_tab = Table(
+                displayName=f"CorrMatrixStatic_{self.timestamp}",
+                ref=f"A{comparison_start + 1}:{last_col}{static_last_row}",
+            )
+            static_tab.tableStyleInfo = TableStyleInfo(
+                name="TableStyleLight11", showRowStripes=True
+            )
+            ws.add_table(static_tab)
+
+            # === DELTA ANALYSIS (Current - Static) ===
+            delta_start = static_last_row + 3
+
+            ws.cell(
+                delta_start, 1, "Correlation Change (Current - Static)"
+            ).font = Font(size=14, bold=True, color=self.colors["header"])
+
+            # Headers
+            ws.cell(delta_start + 1, 1, "Risk Pair").font = Font(bold=True)
+            ws.cell(delta_start + 1, 2, "Current").font = Font(bold=True)
+            ws.cell(delta_start + 1, 3, "Static").font = Font(bold=True)
+            ws.cell(delta_start + 1, 4, "Δ (Change)").font = Font(bold=True)
+            ws.cell(delta_start + 1, 5, "Impact").font = Font(bold=True)
+
+            for c in range(1, 6):
+                ws.cell(delta_start + 1, c).fill = PatternFill(
+                    "solid", self.colors["table_header"]
+                )
+
+            # Calculate and display deltas for off-diagonal pairs
+            delta_row = delta_start + 2
+            risk_pairs = [
+                ("Market", "Credit", 0, 1),
+                ("Market", "OpRisk", 0, 2),
+                ("Credit", "OpRisk", 1, 2),
+            ]
+
+            for pair_name1, pair_name2, idx1, idx2 in risk_pairs:
+                current_corr = float(corr_array[idx1, idx2])
+                static_corr = float(static_array[idx1, idx2])
+                delta = current_corr - static_corr
+
+                ws.cell(delta_row, 1, f"{pair_name1}-{pair_name2}")
+                ws.cell(delta_row, 2, current_corr).number_format = "0.00"
+                ws.cell(delta_row, 3, static_corr).number_format = "0.00"
+
+                delta_cell = ws.cell(delta_row, 4, delta)
+                delta_cell.number_format = "+0.00;-0.00"
+
+                # Color code delta
+                if abs(delta) > 0.2:
+                    delta_cell.fill = PatternFill(
+                        "solid", fgColor="FFC7CE"
+                    )  # Large change - red
+                    impact = "High"
+                elif abs(delta) > 0.1:
+                    delta_cell.fill = PatternFill(
+                        "solid", fgColor="FFEB9C"
+                    )  # Moderate - yellow
+                    impact = "Moderate"
+                else:
+                    delta_cell.fill = PatternFill(
+                        "solid", fgColor="C6EFCE"
+                    )  # Low - green
+                    impact = "Low"
+
+                ws.cell(delta_row, 5, impact)
+                delta_row += 1
+
+            # Add explanatory note
+            note_row = delta_row + 2
+            ws.cell(note_row, 1, "Note:").font = Font(
+                bold=True, color=self.colors["header"]
+            )
+            ws.cell(
+                note_row,
+                2,
+                "Positive Δ indicates increased correlation in current regime (higher contagion risk). "
+                "High impact changes (|Δ| > 0.2) materially affect diversification benefits and "
+                "firm-wide Economic Capital. Review correlation assumptions if changes exceed ±0.3.",
+            )
+            ws.cell(note_row, 2).alignment = Alignment(wrap_text=True, vertical="top")
+            ws.cell(note_row, 2).font = Font(size=9, italic=True, color="555555")
+            ws.merge_cells(f"B{note_row}:E{note_row + 2}")
+
         autofit_columns(ws)
 
     def _create_sensitivity_analysis_sheet(self, wb: Workbook):
@@ -811,6 +997,8 @@ class FirmWideECReporter:
                 confidence_level=level,
                 copula_df=self.copula_df if self.copula_df is not None else 3.0,
                 n_sim=750_000,
+                correlation_matrix=self.correlation_matrix,
+                correlation_regime=self.correlation_regime,
             )
 
             ws.cell(i, 1, f"{level * 100:.1f}%")
