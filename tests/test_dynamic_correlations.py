@@ -92,7 +92,6 @@ def test_rolling_window_correlation():
     print("✓ Rolling window test passed")
 
 
-
 def test_ensure_positive_definite_correction():
     """Test positive definite enforcement."""
 
