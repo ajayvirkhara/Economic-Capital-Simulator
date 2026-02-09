@@ -20,29 +20,311 @@ This document assumes familiarity with:
 
 ---
 
-## 1. Market Risk Engine: Volatility Dynamics & Coherent Measures
-The Market Risk engine is designed to capture the non-normalities and time-varying nature of financial markets.
+## 1. Market Risk Engine: Full Revaluation & Advanced Risk Metrics
 
-* **Volatility Clustering:** Implements **EWMA** and **GARCH(1,1)** estimation to account for heteroskedasticity. This ensures the model reacts to recent market "shocks" rather than assuming constant variance.
-* **Multivariate Student-t Shocks:** The engine draws shocks from a **Multivariate Student-t distribution** ($df=3$) using the Gaussian mixture representation (mathematically equivalent to a t-copula). This explicitly models "Fat Tails" (leptokurtosis) observed in historical asset returns.
-* **Covariance Estimation:** 
-  * **GARCH(1,1):** Estimated via maximum likelihood using the `arch` package with default initialization
-  * **EWMA:** Exponentially weighted with λ=0.97 (configurable)
-* **Horizon Scaling:** 10-day risk measures are scaled to 1-year equivalents using the square-root-of-time rule:
+The Market Risk engine implements institutional-grade risk measurement combining parametric and historical simulation approaches.
 
+### 1.1 Full Revaluation Pricing Framework
+
+Unlike simple delta-gamma approximations, the engine supports **closed-form revaluation** for major asset classes:
+
+#### Equities
+Linear spot-based revaluation:
 $$
-\text{VaR}_{\text{1Y}} = \text{VaR}_{\text{10D}} \times \sqrt{\frac{252}{10}}
+\text{P\&L}_{\text{equity}} = Q \times (S_{\text{shocked}} - S_0)
 $$
 
-* **Simulation Paths:** 500,000 Monte Carlo paths (configurable via `n_paths` parameter).
-* **Non-Linear P&L Mapping:** Linear (delta) + quadratic (gamma) approximation of position-level P&L from factor shocks. No full revaluation or path-dependent pricing is implemented.
-* **Coherent Risk Measures:** * **Value at Risk (VaR):** The $\alpha$-quantile of the loss distribution.
-    * **Expected Shortfall (ES):** Calculates the average loss beyond the VaR threshold. ES is a **coherent risk measure** because it satisfies the property of **subadditivity**, ensuring diversification is mathematically recognized.
-* **Euler Allocation (Marginal ES):** Capital is attributed back to individual positions using the principle of marginal contribution:
+where $Q$ = quantity, $S_0$ = current spot price.
 
+#### Fixed Income (Bonds & Bond ETFs)
+Duration-convexity approximation:
 $$
-\text{Contribution}_i = E[L_i \mid L_{\text{portfolio}} \ge \text{VaR}_\alpha]
+\frac{\Delta P}{P} \approx -D \cdot \Delta y + \frac{1}{2} C \cdot (\Delta y)^2
 $$
+
+where:
+- $D$ = modified duration (years)
+- $C$ = convexity (years²)
+- $\Delta y$ = yield change (from shocked price returns)
+
+**Critical Implementation Note:** Bond ETF returns are converted to implied yield changes:
+$$
+\Delta y \approx -\frac{\Delta P / P}{D}
+$$
+
+This ensures consistency when applying duration-based pricing models to ETF return shocks.
+
+#### FX Forwards
+Discounted forward pricing:
+$$
+\text{MTM} = N \times (F_{\text{market}} - K) \times e^{-r_d T}
+$$
+
+where:
+$$
+F_{\text{market}} = S_{\text{shocked}} \times e^{(r_d - r_f)T}
+$$
+
+- $N$ = notional, $K$ = strike, $T$ = maturity
+- $r_d, r_f$ = domestic and foreign risk-free rates
+
+#### European Options
+Black-Scholes closed-form pricing:
+$$
+C = S \Phi(d_1) - K e^{-rT} \Phi(d_2)
+$$
+$$
+P = K e^{-rT} \Phi(-d_2) - S \Phi(-d_1)
+$$
+
+where:
+$$
+d_1 = \frac{\ln(S/K) + (r + \sigma^2/2)T}{\sigma\sqrt{T}}, \quad d_2 = d_1 - \sigma\sqrt{T}
+$$
+
+#### Interest Rate Swaps
+DV01-based approximation:
+$$
+\text{MTM}_{\text{swap}} = \text{DV01} \times \Delta r \times 10000
+$$
+
+where:
+$$
+\text{DV01} = \frac{\text{Notional} \times \text{Tenor}}{10000}
+$$
+
+#### Fallback: Delta-Gamma Approximation
+For positions without explicit pricing models:
+$$
+\text{P\&L} = \sum_i \delta_i \Delta S_i + \frac{1}{2} \sum_{i,j} \gamma_{ij} \Delta S_i \Delta S_j + \sum_i \nu_i \Delta \sigma_i
+$$
+
+**Configuration:** Set `use_full_revaluation: false` to use delta-gamma exclusively.
+
+---
+
+### 1.2 Volatility Dynamics & Covariance Estimation
+
+#### EWMA (Exponentially Weighted Moving Average)
+RiskMetrics-style covariance with exponential decay:
+$$
+\Sigma_t = \lambda \Sigma_{t-1} + (1-\lambda) r_t r_t^\top
+$$
+
+Default: $\lambda = 0.97$ (~33-day half-life)
+
+**Bias correction** for finite samples:
+$$
+\Sigma = \frac{\Sigma_t}{1 - \lambda^T}
+$$
+
+#### GARCH(1,1)
+Univariate conditional volatility per factor:
+$$
+\sigma_t^2 = \omega + \alpha \epsilon_{t-1}^2 + \beta \sigma_{t-1}^2
+$$
+
+Estimated via maximum likelihood using the `arch` package (with automatic fallback to EWMA if unavailable).
+
+**Covariance construction:**
+$$
+\Sigma_{\text{GARCH}} = \text{diag}(\sigma_{\text{GARCH}}) \times \rho_{\text{sample}} \times \text{diag}(\sigma_{\text{GARCH}})
+$$
+
+where $\rho_{\text{sample}}$ = sample correlation matrix.
+
+#### Regime-Switching Volatility Detection
+Identifies high/low volatility regimes using rolling window comparison:
+$$
+\text{Regime} = \begin{cases}
+\text{High Vol} & \text{if } \sigma_{\text{short}} > 1.5 \times \sigma_{\text{long}} \\
+\text{Low Vol} & \text{if } \sigma_{\text{short}} < 0.7 \times \sigma_{\text{long}} \\
+\text{Normal} & \text{otherwise}
+\end{cases}
+$$
+
+where:
+- $\sigma_{\text{short}}$ = 20-day rolling volatility
+- $\sigma_{\text{long}}$ = 60-day rolling volatility
+
+This provides early warning signals for volatility regime shifts without full Markov-switching estimation.
+
+---
+
+### 1.3 Multivariate Student-t Shock Generation
+
+Factor shocks follow a **multivariate Student-t distribution** with $\nu = 3$ degrees of freedom (configurable):
+$$
+\mathbf{X} = \boldsymbol{\mu} + \frac{\mathbf{Z}}{\sqrt{\chi^2_\nu / \nu}}
+$$
+
+where:
+- $\mathbf{Z} \sim \mathcal{N}(0, \Sigma)$
+- $\chi^2_\nu$ = chi-squared variate with $\nu$ degrees of freedom
+
+**Key Properties:**
+1. **Fat tails:** Excess kurtosis = $\frac{6}{\nu - 4}$ (infinite for $\nu \leq 4$)
+2. **Tail dependence:** Captures joint extreme moves (crisis contagion)
+3. **Mathematically equivalent to t-copula** with Gaussian marginals
+
+**Horizon accumulation:**
+10-day VaR constructed by summing daily shocks:
+$$
+\mathbf{X}_{10D} = \sum_{t=1}^{10} \mathbf{X}_t
+$$
+
+---
+
+### 1.4 Coherent Risk Measures
+
+#### Value-at-Risk (VaR)
+The $\alpha$-quantile of the portfolio loss distribution:
+$$
+\text{VaR}_\alpha = -\inf\{x : F_L(x) \geq 1 - \alpha\}
+$$
+
+Default: $\alpha = 99.9\%$
+
+#### Expected Shortfall (ES)
+Conditional expectation of losses beyond VaR (also called CVaR or Tail VaR):
+$$
+\text{ES}_\alpha = \mathbb{E}[L \mid L \geq \text{VaR}_\alpha]
+$$
+
+**Coherence Properties:**
+- ✅ Subadditive: $\text{ES}(X + Y) \leq \text{ES}(X) + \text{ES}(Y)$
+- ✅ Monotonicity, translation invariance, positive homogeneity
+
+This makes ES the preferred risk measure for capital allocation (Basel III, FRTB).
+
+#### Time Scaling
+Square-root-of-time rule for 10-day → 1-year extrapolation:
+$$
+\text{VaR}_{1Y} = \text{VaR}_{10D} \times \sqrt{\frac{252}{10}} \approx \text{VaR}_{10D} \times 5.02
+$$
+
+**Assumptions:** IID returns, no serial correlation, constant volatility.
+
+---
+
+### 1.5 Historical Value-at-Risk (HVaR)
+
+For model validation, the engine supports **historical simulation**:
+
+1. **Bootstrap resampling** from actual market returns (lookback: 252 days default)
+2. **Horizon scaling** via $\sqrt{T}$ multiplication
+3. **Comparison** to parametric VaR for calibration diagnostics
+
+**Model Validation Criteria:**
+$$
+\text{Divergence} = \frac{\text{HVaR} - \text{VaR}_{\text{param}}}{\text{VaR}_{\text{param}}} \times 100\%
+$$
+
+- **<10% divergence:** Model well-calibrated ✓
+- **10-20%:** Moderate divergence (review assumptions)
+- **>20%:** Large divergence (recalibrate or investigate structural breaks)
+
+---
+
+### 1.6 Conditional Value-at-Risk (CoVaR)
+
+**Definition:** Portfolio VaR conditional on a specific position being stressed to its own VaR level.
+
+**Mathematical Framework:**
+$$
+\text{CoVaR}_\alpha^{i|j} = \text{VaR}_\alpha^i \mid L_j = \text{VaR}_\alpha^j
+$$
+
+**Incremental Systemic Contribution (ΔCoVaR):**
+$$
+\Delta\text{CoVaR}^{i|j} = \text{CoVaR}_\alpha^{i|j} - \text{VaR}_\alpha^i
+$$
+
+**Interpretation:**
+- **Positive ΔCoVaR:** Position $j$ amplifies portfolio risk when stressed (systemic risk)
+- **Negative ΔCoVaR:** Position $j$ provides diversification when stressed
+- **Magnitude:** Quantifies interconnectedness (Adrian & Brunnermeier, 2016)
+
+**Implementation:**
+1. Identify scenarios where $L_j \geq \text{VaR}_\alpha^j$
+2. Compute conditional $\alpha$-quantile of portfolio losses in those scenarios
+3. Compare to unconditional portfolio VaR
+
+**Risk Classification:**
+- **High Systemic:** ΔCoVaR contribution > 10% of portfolio VaR
+- **Moderate Systemic:** 5-10%
+- **Low Systemic:** <5%
+
+---
+
+### 1.7 Euler Capital Allocation
+
+Capital is attributed to positions using the **marginal contribution principle**:
+$$
+\text{EC}_i = \mathbb{E}[L_i \mid L_{\text{portfolio}} \geq \text{VaR}_\alpha]
+$$
+
+**Properties:**
+1. **Full allocation:** $\sum_i \text{EC}_i = \text{ES}_{\text{portfolio}}$ (by construction)
+2. **Diversification-aware:** Accounts for correlations
+3. **Coherent:** Respects subadditivity
+
+**Numerical Implementation:**
+$$
+\text{EC}_i = -\frac{1}{N_{\text{tail}}} \sum_{p \in \text{Tail}} L_{i,p}
+$$
+
+where Tail = scenarios where $L_{\text{portfolio}} \geq \text{VaR}_\alpha$.
+
+---
+
+### 1.8 Stress Testing
+
+**Methodology:** Mean-shift approach with fixed covariance structure.
+
+**Example Scenarios:**
+- **Market Crash:** SPY -40%, TLT +200 bps, LQD +50 bps spread widening
+- **Rates Shock:** Parallel shift in yield curve
+- **FX Crisis:** Major currency devaluation
+
+**Implementation:**
+$$
+\boldsymbol{\mu}_{\text{stressed}} = \boldsymbol{\mu}_{\text{baseline}} + \boldsymbol{s} / T
+$$
+
+where $\boldsymbol{s}$ = shock vector, $T$ = horizon (10 days).
+
+**Output:**
+- Stressed VaR/ES (1-year)
+- Comparison to baseline
+- Capital uplift required
+
+---
+
+### 1.9 Configuration & Execution
+
+**Key Parameters (`market_config.yaml`):**
+```yaml
+n_paths: 500000              # Monte Carlo paths
+horizon_days: 10             # Risk horizon
+var_q: 0.999                 # Confidence level
+df_t: 3.0                    # Student-t degrees of freedom
+cov_method: "EWMA"           # EWMA | GARCH | SAMPLE
+ewma_lambda: 0.97            # EWMA decay factor
+use_full_revaluation: true   # Enable closed-form pricing
+use_historical_var: false    # Enable HVaR comparison
+compute_covar: true          # Enable CoVaR analysis
+stress_enabled: true         # Enable stress scenarios
+```
+
+**Execution:**
+```bash
+python -m econ_capital.market_risk.run_marketrisk_report
+```
+
+**Outputs:**
+- `MarketRisk_EC_Report_*.xlsx` (8 sheets: Cover, Summary, Waterfall, CoVaR, Factor Analysis, Stress Testing, Historical vs Parametric, Methodology)
+- `market_risk_results_*.json` (machine-readable)
 
 
 ---
@@ -259,6 +541,38 @@ $$
 - **Horizon scaling**: 10-day VaR/ES scaled to 1-year using √(252/10) rule.
 - **Monte Carlo paths**: Default 500,000 (configurable via `n_paths`); 750,000 used in firm-wide aggregation when t-copula is active.
 
+##### Advanced Market Risk Features
+
+**Full Revaluation Pricing:**
+- **Equity positions:** Linear spot revaluation (quantity × ΔS)
+- **Bond positions:** Duration/convexity approximation with yield conversion from ETF returns
+- **FX forwards:** Discounted forward pricing with interest rate differentials
+- **European options:** Black-Scholes with configurable volatility, risk-free rate
+- **Interest rate swaps:** DV01-based revaluation (notional × tenor / 10000)
+- **Fallback:** Delta-gamma when `use_full_revaluation: false`
+
+**Historical VaR:**
+- **Lookback window:** 252 trading days (configurable via `historical_lookback_days`)
+- **Sampling method:** Bootstrap with replacement (10,000 simulations default)
+- **Horizon scaling:** √(horizon_days) multiplication
+- **Validation threshold:** ±20% divergence from parametric VaR triggers recalibration warning
+
+**CoVaR Analysis:**
+- **Conditioning level:** 99% (hardcoded in `compute_covar()`)
+- **Top positions analyzed:** 10 (sorted by absolute component ES)
+- **Classification thresholds:**
+  - High systemic: ΔCoVaR > 10% of portfolio VaR
+  - Moderate systemic: 5-10%
+  - Low systemic: <5%
+- **Correlation:** Exposure-asset correlation for WWR positions (not applied in market risk)
+
+**Regime Detection:**
+- **Short-term window:** 20 trading days
+- **Long-term window:** 60 trading days
+- **High vol threshold:** σ_short > 1.5 × σ_long
+- **Low vol threshold:** σ_short < 0.7 × σ_long
+- **Purpose:** Early warning system (does not modify covariance estimation)
+
 #### Credit Risk Parameters
 
 **Core Risk Parameters:**
@@ -376,6 +690,9 @@ $$
 - Merton, R.C. (1974). On the Pricing of Corporate Debt: The Risk Structure of Interest Rates. *Journal of Finance*, 29(2), 449–470.
 - Vasicek, O. (1987). Probability of Loss on Loan Portfolio. *KMV Corporation*.
 - Pykhtin, M., Zhu, S. (2007). A Guide to Modeling Counterparty Credit Risk. *GARP Risk Review*, July/August.
+- Adrian, T., & Brunnermeier, M. K. (2016). CoVaR. *American Economic Review*, 106(7), 1705-1741. https://doi.org/10.1257/aer.20120555.
+- Hull, J. C. (2018). *Options, Futures, and Other Derivatives* (10th ed.). Pearson. (Black-Scholes implementation).
+- Alexander, C. (2008). *Market Risk Analysis Volume II: Practical Financial Econometrics*. Wiley. (EWMA and GARCH).
 
 ### Implementation Standards
 
