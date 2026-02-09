@@ -70,12 +70,13 @@ Each risk type can be executed and validated independently, with shared utilitie
 │   │   └── __main__.py                                     # Module entry point
 │   ├── market_risk/                              # Market Risk
 │   │   ├── config.py                                       # Market module config loader
-│   │   ├── covariance.py                                   # EWMA/GARCH covariance models
-│   │   ├── data_loaders.py                                 # Factor and pricing data ingestion
-│   │   ├── engine.py                                       # Monte Carlo risk engine
+│   │   ├── covariance.py                                   # EWMA/GARCH covariance models + regime switching
+│   │   ├── data_loaders.py                                 # Factor and pricing data ingestion with pricing setup
+│   │   ├── engine.py                                       # Monte Carlo risk engine with full revaluation
+│   │   ├── marketrisk_pricing.py                           # Full revaluation pricing (Equities, Bonds, FX, Options, Swaps)
 │   │   ├── shocks.py                                       # Multivariate t-copula simulation
 │   │   ├── stats.py                                        # VaR, ES, and backtesting functions
-│   │   ├── marketrisk_reporting.py                         # Regulatory-grade Excel report generation
+│   │   ├── marketrisk_reporting.py                         # Regulatory-grade Excel report generation with advanced metrics
 │   │   ├── run_marketrisk_report.py                        # Driver script for full Market Risk simulation + report
 │   │   ├── __init__.py                                     # Exposes the public API
 │   │   └── __main__.py                                     # Module entry point
@@ -170,11 +171,24 @@ Each risk type can be executed and validated independently, with shared utilitie
 * **Demo**: `python -m econ_capital.credit_risk.demo_exposure`
 
 ### 🔹 Market Risk
-* **Multivariate *t*-copula** for correlated market shocks
-* **Delta–Gamma VaR/ES** estimation with decomposition
-* **Stress testing** and historical shock replays
-* **Covariance estimation** via EWMA or GARCH(1,1)
-* **Euler allocation** for capital attribution
+* **Multivariate *t*-copula** for correlated market shocks with configurable degrees of freedom
+* **Full Revaluation Pricing:**
+  * **Equities:** Linear spot-based revaluation
+  * **Fixed Income:** Duration-convexity approximation for bonds and bond ETFs
+  * **FX Forwards:** Discounted forward pricing with interest rate differentials
+  * **European Options:** Black-Scholes closed-form pricing with Greeks
+  * **Interest Rate Swaps:** DV01-based revaluation
+  * **Fallback mode:** Delta-Gamma approximation for legacy compatibility
+* **Advanced Volatility Modeling:**
+  * **EWMA** (λ=0.97) and **GARCH(1,1)** covariance estimation
+  * **Regime-Switching Detection:** Identifies high/low volatility regimes based on rolling vol ratios
+* **Comprehensive Risk Metrics:**
+  * **VaR/ES** at 99.9% confidence (10-day and 1-year horizons)
+  * **Historical VaR/ES:** Bootstrap simulation from actual market history for model validation
+  * **CoVaR (Conditional VaR):** Systemic risk contribution measurement per position
+  * **ΔCoVaR:** Incremental systemic impact quantification
+* **Stress Testing:** Predefined shock scenarios with mean-shift methodology
+* **Euler Allocation:** Marginal ES contribution for capital attribution to positions
 
 ### 🔹 Operational Risk
 * **Loss Distribution Approach (LDA)** combining Poisson frequency + hybrid Lognormal/GPD severity modelling
@@ -198,12 +212,23 @@ This module provides:
 This ensures a professional, uniform look across Market, Credit, OpRisk, and Firm-Wide reports.
 
 #### Market Risk Report
-- **File**: `Market_Risk_EC_Report_*.xlsx` (in `econ_capital/market_risk/reports/`)
+- **File**: `MarketRisk_EC_Report_*.xlsx` (in `econ_capital/market_risk/reports/`)
 - **Key Sheets**:
-  - Summary: 10-day & 1-year VaR/ES at 99.9%, stressed scenarios
-  - Capital Breakdown: Top position contributions (Euler allocation on ES)
-  - Positions: Full portfolio holdings table
-  - Charts: Bar chart of largest contributors
+  - **Cover:** Executive summary with key metrics
+  - **Summary:** Run configuration, 10-day & 1-year VaR/ES (99.9%), stressed scenarios
+  - **Waterfall:** Top 10 position contributions with Euler allocation, bar chart visualization
+  - **CoVaR Systemic Risk:** Conditional VaR analysis showing systemic contribution by position
+    - CoVaR and ΔCoVaR metrics
+    - Risk classification (High/Moderate/Low Systemic)
+    - Conditional formatting for risk amplifiers
+  - **Risk Factor Analysis:** 
+    - Factor-level volatility decomposition (daily and annual)
+    - Volatility regime detection (High Vol/Normal/Low Vol)
+    - Marginal contributions to portfolio volatility
+    - Top correlated factor pairs
+  - **Stress Testing:** Baseline vs. stressed capital comparison with scenario details
+  - **Historical vs Parametric:** Model validation comparing Historical VaR to Parametric VaR
+  - **Methodology:** Technical documentation of methods, formulas, and references
 
 #### Credit Risk Report
 - **File**: `Credit_Risk_EC_Report_*.xlsx` (in `econ_capital/credit_risk/reports/`)
