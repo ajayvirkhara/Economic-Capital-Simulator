@@ -5,7 +5,7 @@ Unit tests for econ_capital.market_risk.data_loaders module.
 import pytest
 import pandas as pd
 import numpy as np
-from unittest.mock import patch, ANY
+from unittest.mock import patch
 
 from econ_capital.market_risk.data_loaders import (
     load_real_risk_factors,
@@ -17,88 +17,88 @@ from econ_capital.market_risk.data_loaders import (
 # --- Tests for load_real_risk_factors ---
 
 
-@patch("econ_capital.market_risk.data_loaders.yf.download")
-def test_load_real_risk_factors_explicit_tickers(mock_download):
-    """Test loading with explicit tickers argument."""
-    dates = pd.date_range("2020-12-01", periods=11)
+@patch("econ_capital.market_risk.data_loaders.Fred")
+def test_load_real_risk_factors_explicit_tickers(mock_fred_class):
+    """Test loading with explicit FRED series IDs."""
+    mock_fred = mock_fred_class.return_value
 
-    mock_adj = pd.DataFrame(
-        np.random.randn(11, 2) * 5 + 100, index=dates, columns=["SPY", "TLT"]
-    )
-    mock_close = mock_adj * 1.002  # slightly different just to be realistic
+    dates = pd.date_range("2020-12-01", periods=11, freq="B")
 
-    mock_data = pd.concat(
-        {
-            "Adj Close": mock_adj,
-            "Close": mock_close,
-        },
-        axis=1,
-        names=["Price Type", "Ticker"],
-    ).sort_index(axis=1)  # NO swaplevel
+    # Mock two example FRED series
+    mock_dgs10 = pd.Series(np.linspace(1.5, 1.8, 11), index=dates, name="DGS10")
+    mock_vix = pd.Series(np.random.uniform(15, 35, 11), index=dates, name="VIXCLS")
 
-    mock_download.return_value = mock_data
+    def get_series_side_effect(series_id, observation_start=None, observation_end=None):
+        if series_id == "DGS10":
+            return mock_dgs10
+        if series_id == "VIXCLS":
+            return mock_vix
+        raise ValueError(f"Unexpected FRED series: {series_id}")
 
-    tickers = {"SPY": "Equity_US", "TLT": "Rates"}
-    returns = load_real_risk_factors(
+    mock_fred.get_series.side_effect = get_series_side_effect
+
+    tickers = {"10Y_Yield": "DGS10", "VIX": "VIXCLS"}  # real FRED IDs → column names
+    levels = load_real_risk_factors(
         start="2020-12-01", end="2020-12-20", tickers=tickers
     )
 
-    assert isinstance(returns, pd.DataFrame)
-    assert list(returns.columns) == ["SPY", "TLT"]
-    assert returns.shape == (10, 2)
-    mock_download.assert_called_once_with(
-        ["SPY", "TLT"], start="2020-12-01", end="2020-12-20", progress=False
-    )
+    assert isinstance(levels, pd.DataFrame)
+    assert list(levels.columns) == ["10Y_Yield", "VIX"]
+    assert levels.shape == (11, 2)  # levels, no pct_change drop
+    assert mock_fred.get_series.call_count == 2
 
 
 @patch("econ_capital.market_risk.data_loaders.load_market_yaml")
-@patch("econ_capital.market_risk.data_loaders.yf.download")
-def test_load_real_risk_factors_yaml_override(mock_download, mock_yaml):
+@patch("econ_capital.market_risk.data_loaders.Fred")
+def test_load_real_risk_factors_yaml_override(mock_fred_class, mock_yaml):
     """Test loading with YAML overrides."""
-    mock_yaml.return_value = {"tickers": {"SPY": "Equity_US", "EEM": "Equity_EM"}}
+    mock_yaml.return_value = {
+        "tickers": {
+            "10Y_Yield": "DGS10",
+            "Unemployment": "UNRATE",
+        }  # FIXED: Column → FRED ID
+    }
 
-    dates = pd.date_range("2020-12-01", periods=11)
-    mock_adj = pd.DataFrame(
-        np.random.randn(11, 2) * 5 + 100, index=dates, columns=["SPY", "EEM"]
-    )
-    mock_close = mock_adj * 1.0015
+    mock_fred = mock_fred_class.return_value
 
-    mock_data = pd.concat(
-        {"Adj Close": mock_adj, "Close": mock_close},
-        axis=1,
-        names=["Price Type", "Ticker"],
-    ).sort_index(axis=1)  # NO swaplevel
+    dates = pd.date_range("2020-12-01", periods=11, freq="B")
+    mock_dgs10 = pd.Series(np.linspace(1.5, 1.8, 11), index=dates, name="DGS10")
+    mock_unrate = pd.Series(np.linspace(5.0, 4.5, 11), index=dates, name="UNRATE")
 
-    mock_download.return_value = mock_data
+    def get_series_side_effect(series_id, observation_start=None, observation_end=None):
+        if series_id == "DGS10":
+            return mock_dgs10
+        if series_id == "UNRATE":
+            return mock_unrate
+        raise ValueError(f"Unexpected FRED series: {series_id}")
 
-    returns = load_real_risk_factors(start="2020-01-01", end="2021-01-01")
+    mock_fred.get_series.side_effect = get_series_side_effect
 
-    assert list(returns.columns) == ["SPY", "EEM"]
-    assert returns.shape == (10, 2)
+    levels = load_real_risk_factors(start="2020-01-01", end="2021-01-01")
+
+    assert list(levels.columns) == ["10Y_Yield", "Unemployment"]
+    assert levels.shape[0] > 0
+    assert mock_fred.get_series.call_count == 2
     mock_yaml.assert_called_once()
 
 
-@patch("econ_capital.market_risk.data_loaders.yf.download")
-def test_load_real_risk_factors_fallback_close(mock_download):
-    """Test fallback to 'Close' if 'Adj Close' not available."""
-    dates = pd.date_range("2020-12-01", periods=11)
-    mock_close = pd.DataFrame(
-        np.random.randn(11, 1) * 5 + 100, index=dates, columns=["SPY"]
-    )
+@patch("econ_capital.market_risk.data_loaders.Fred")
+def test_load_real_risk_factors_fallback(mock_fred_class):
+    """Test basic fallback / error handling."""
+    mock_fred = mock_fred_class.return_value
 
-    mock_data = pd.concat(
-        {"Close": mock_close}, axis=1, names=["Price Type", "Ticker"]
-    ).sort_index(axis=1)  # NO swaplevel
+    dates = pd.date_range("2020-12-01", periods=11, freq="B")
+    mock_series = pd.Series(np.random.randn(11), index=dates, name="DGS10")
 
-    mock_download.return_value = mock_data
+    mock_fred.get_series.return_value = mock_series
 
-    tickers = {"SPY": "Equity_US"}
-    returns = load_real_risk_factors(
+    tickers = {"10Y_Yield": "DGS10"}
+    levels = load_real_risk_factors(
         start="2020-01-01", end="2021-01-01", tickers=tickers
     )
 
-    assert "SPY" in returns.columns
-    assert returns.shape[0] == 10  # pct_change drops one
+    assert "10Y_Yield" in levels.columns
+    assert levels.shape[0] > 0
 
 
 # --- Tests for load_dummy_positions ---
@@ -133,61 +133,33 @@ def test_load_dummy_positions_hardcoded_defaults():
     assert "SPY" in df.columns
     assert df.loc["Equity_US", "SPY"] == 250_000_000
     assert df.loc["Rates", "TLT"] == -100_000_000
-    assert df.shape == (9, 9)  # From the hardcoded idx and columns
+    assert df.shape == (9, 9)
 
 
 # --- Tests for load_historical_returns ---
 
 
-@patch("econ_capital.market_risk.data_loaders.yf.download")
-def test_load_historical_returns_yahoo(mock_download):
-    """Test Yahoo source."""
-    dates = pd.date_range("2020-12-01", periods=11)
-    mock_adj = pd.DataFrame(
-        np.random.randn(11, 2) * 5 + 100, index=dates, columns=["SPY", "TLT"]
-    )
-    mock_close = mock_adj * 1.0015
+@patch("econ_capital.market_risk.data_loaders.Fred")
+def test_load_historical_returns_fred(mock_fred_class):
+    """Test log returns from FRED series."""
+    mock_fred = mock_fred_class.return_value
 
-    mock_data = pd.concat(
-        {"Adj Close": mock_adj, "Close": mock_close},
-        axis=1,
-        names=["Price Type", "Ticker"],
-    ).sort_index(axis=1)  # NO swaplevel
-
-    mock_download.return_value = mock_data
-
-    returns = load_historical_returns(
-        tickers=["SPY", "TLT"],
-        start_date="2020-01-01",
-        end_date="2021-01-01",
-        source="yahoo",
-    )
-
-    assert returns.shape == (10, 2)
-    assert np.allclose(returns, np.log(mock_adj / mock_adj.shift(1)).dropna())
-
-
-@patch("pandas_datareader.data.DataReader")
-def test_load_historical_returns_fred(mock_datareader):
-    """Test FRED source."""
     dates = pd.date_range("2020-01-01", periods=20, freq="B")
-    mock_df = pd.DataFrame(
-        np.abs(np.random.randn(20, 1)) * 0.01 + 0.02,  # positive values
-        index=dates,
-        columns=["DGS10"],
-    )
-    mock_datareader.return_value = mock_df
+    mock_series = pd.Series(np.linspace(1.5, 2.0, 20), index=dates, name="DGS10")
+
+    mock_fred.get_series.return_value = mock_series
 
     returns = load_historical_returns(
-        tickers=["DGS10"], start_date="2020-01-01", source="fred"
+        tickers=["DGS10"],
+        start_date="2020-01-01",
+        source="fred",
     )
 
-    expected_rows = len(mock_df) - 1
-    assert returns.shape == (expected_rows, 1)
-    mock_datareader.assert_called_once_with("DGS10", "fred", "2020-01-01", ANY)
+    assert returns.shape == (19, 1)
+    assert returns.columns.tolist() == ["DGS10"]
 
 
 def test_load_historical_returns_unknown_source():
     """Test error for unknown source."""
-    with pytest.raises(ValueError, match="Unknown source"):
-        load_historical_returns(tickers=["SPY"], source="invalid")
+    with pytest.raises(ValueError, match="Only source='fred'"):
+        load_historical_returns(tickers=["DGS10"], source="yahoo")
