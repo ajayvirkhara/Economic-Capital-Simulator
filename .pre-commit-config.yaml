@@ -34,9 +34,11 @@ repos:
           - pyyaml
           - openpyxl
           - yfinance
-          - pandas-datareader
+          - fredapi>=0.5.2 
           - tqdm
           - setuptools
+          - pandas>=2.2.1
+          - matplotlib
 
   # Nbstriput - strip Notebook outputs
   -   repo: https://github.com/kynan/nbstripout
