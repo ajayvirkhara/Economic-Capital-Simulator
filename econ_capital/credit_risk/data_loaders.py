@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import pandas as pd
-from pandas_datareader import data as web
+from fredapi import Fred
 
 from econ_capital.utils import setup_logging
 
@@ -32,21 +32,44 @@ CSV_SCHEMA = [
 
 
 # --- A) Free credit indices (macro anchors) ---
-def load_credit_indexes(start="2015-01-01", end=None) -> pd.DataFrame:
+def load_credit_indexes(
+    start: str = "2015-01-01", end: str | None = None
+) -> pd.DataFrame:
+    """
+    Load key credit spread indices from FRED:
+    - Investment Grade OAS (BAMLC0A0CM)
+    - High Yield OAS (BAMLH0A0HYM2)
+    - Moody's Seasoned Baa Corporate Bond Yield (DBAA)
+    """
     end = end or datetime.today().strftime("%Y-%m-%d")
+
+    api_key = "c6fc80debe9ed7ad0ee697eb52a86349"
+    fred = Fred(api_key=api_key)
+
     series = {
         "IG_OAS_bps": "BAMLC0A0CM",
         "HY_OAS_bps": "BAMLH0A0HYM2",
         "BAA_yield_pct": "DBAA",
     }
-    df = pd.concat(
-        [
-            web.DataReader(v, "fred", start, end).rename(columns={v: k})
-            for k, v in series.items()
-        ],
-        axis=1,
-    )
-    return df.dropna()
+
+    data = {}
+    for col_name, series_id in series.items():
+        try:
+            s = fred.get_series(
+                series_id,
+                observation_start=start,
+                observation_end=end,
+            )
+            data[col_name] = s
+            logger.debug(f"Fetched {series_id} → {col_name} ({len(s)} obs)")
+        except Exception as e:
+            logger.error(f"Failed to fetch {series_id}: {e}")
+            raise
+
+    df = pd.DataFrame(data)
+    if df.empty:
+        logger.warning("No data fetched from FRED series - returning empty DataFrame")
+    return df.dropna(how="all")
 
 
 # --- B) Issuer-level CSV loader ---
