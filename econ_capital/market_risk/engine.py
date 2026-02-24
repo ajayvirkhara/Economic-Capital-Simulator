@@ -307,6 +307,7 @@ class MarketRiskEconomicCapital:
         cov = cov_df.to_numpy()
 
         # Numerical jitter for Cholesky stability
+        cov = cov.copy()
         cov += 1e-8 * np.eye(self.n_factors)
 
         elapsed = time.perf_counter() - t0
