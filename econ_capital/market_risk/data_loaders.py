@@ -10,7 +10,9 @@ from __future__ import annotations
 from typing import Dict
 import pandas as pd
 import numpy as np
-import yfinance as yf
+import fredapi as Fred
+import os
+from datetime import datetime
 from typing import Any, Optional
 
 from .config import load_market_yaml, resolve_tickers
@@ -37,30 +39,41 @@ def load_real_risk_factors(
     Returns:
         pd.DataFrame: Daily returns of each risk factor.
     """
-    # Step 1: Explicit tickers override everything
+    api_key = os.getenv("FRED_API_KEY")
+    if not api_key:
+        raise ValueError(
+            "FRED_API_KEY environment variable not set. "
+            "Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html"
+        )
+
+    fred = Fred(api_key=api_key)
+
+    # Priority order remains the same
     if tickers is not None:
         selected = tickers
     else:
-        # Step 2: YAML overrides, else fallback to defaults
         yaml_cfg = load_market_yaml()
         selected = resolve_tickers(yaml_cfg)
 
-    # Step 3: Fetch data
-    data = yf.download(list(selected.keys()), start=start, end=end, progress=False)
+    data = {}
+    for col_name, series_id in selected.items():
+        try:
+            s = fred.get_series(
+                series_id,
+                observation_start=start,
+                observation_end=end,
+            )
+            data[col_name] = s
+        except Exception as e:
+            print(f"Failed to fetch {series_id} ({col_name}): {e}")
+            data[col_name] = pd.Series(dtype=float)  # fallback
 
-    # Use Adjusted Close if available, else fallback to Close
-    prices = (
-        data["Adj Close"].dropna() if "Adj Close" in data else data["Close"].dropna()
-    )
-    returns = prices.pct_change().dropna()
+    df = pd.DataFrame(data)
 
-    # Confirm data
-    print(f"Loaded returns shape: {returns.shape}")
-    print(returns.tail(5))
-    print(f"Returns std: {returns.std()}")
+    # Fill gaps
+    df = df.ffill().bfill()
 
-    returns.columns = list(selected.keys())
-    return returns
+    return df
 
 
 def load_dummy_positions(
@@ -153,42 +166,38 @@ def load_historical_returns(
     returns : pd.DataFrame
         Daily log returns, columns = tickers
     """
-    import yfinance as yf
-    from datetime import datetime
+    if source != "fred":
+        raise ValueError("Only source='fred' is now supported (using fredapi)")
+
+    api_key = os.getenv("FRED_API_KEY")
+    if not api_key:
+        raise ValueError("FRED_API_KEY environment variable not set")
+
+    fred = Fred(api_key=api_key)
 
     if end_date is None:
         end_date = datetime.today().strftime("%Y-%m-%d")
 
-    if source == "yahoo":
-        # Download adjusted close prices
-        data = yf.download(tickers, start=start_date, end=end_date, progress=False)
-        prices = data["Adj Close"]
+    dfs = []
+    for ticker in tickers:
+        try:
+            s = fred.get_series(
+                ticker,
+                observation_start=start_date,
+                observation_end=end_date,
+            )
+            s.name = ticker
+            dfs.append(s)
+        except Exception as e:
+            print(f"Failed to load {ticker}: {e}")
 
-        # Compute log returns
-        returns = np.log(prices / prices.shift(1)).dropna()
+    if not dfs:
+        raise ValueError("No FRED series loaded successfully")
 
-        return returns
+    prices = pd.concat(dfs, axis=1).sort_index()
+    returns = np.log(prices / prices.shift(1)).dropna()
 
-    elif source == "fred":
-        # Use pandas_datareader for FRED data
-        from pandas_datareader import data as web
-
-        dfs = []
-        for ticker in tickers:
-            try:
-                df = web.DataReader(ticker, "fred", start_date, end_date)
-                dfs.append(df)
-            except Exception as e:
-                print(f"Failed to load {ticker}: {e}")
-
-        prices = pd.concat(dfs, axis=1)
-        prices.columns = tickers
-        returns = np.log(prices / prices.shift(1)).dropna()
-
-        return returns
-
-    else:
-        raise ValueError(f"Unknown source: {source}")
+    return returns
 
 
 def convert_positions_to_dict(
