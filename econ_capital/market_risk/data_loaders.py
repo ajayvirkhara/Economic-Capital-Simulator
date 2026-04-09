@@ -10,12 +10,15 @@ from __future__ import annotations
 from typing import Dict
 import pandas as pd
 import numpy as np
-import fredapi as Fred
+from fredapi import Fred
 import os
 from datetime import datetime
 from typing import Any, Optional
 
-from .config import load_market_yaml, resolve_tickers
+from .config import load_market_yaml
+from dotenv import load_dotenv
+
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
 
 def load_real_risk_factors(
@@ -23,57 +26,64 @@ def load_real_risk_factors(
     end: str = "2025-01-01",
     tickers: Dict[str, str] | None = None,
 ) -> pd.DataFrame:
-    """
-    Fetch historical returns for multi-asset risk factors from Yahoo Finance.
-
-    Priority order for tickers:
-        1. Explicit tickers argument (highest priority)
-        2. YAML overrides in config/market_config.yaml
-        3. Python DEFAULT_TICKERS (fallback)
-
-    Args:
-        start (str): Start date for data download (YYYY-MM-DD).
-        end (str): End date for data download (YYYY-MM-DD).
-        tickers (Dict[str, str], optional): Explicit mapping of ticker symbols to asset class names.
-
-    Returns:
-        pd.DataFrame: Daily returns of each risk factor.
-    """
     api_key = os.getenv("FRED_API_KEY")
     if not api_key:
-        raise ValueError(
-            "FRED_API_KEY environment variable not set. "
-            "Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html"
-        )
+        raise ValueError("FRED_API_KEY environment variable not set.")
 
     fred = Fred(api_key=api_key)
 
-    # Priority order remains the same
-    if tickers is not None:
-        selected = tickers
-    else:
+    # Use these specific FRED IDs which actually exist in their database
+    fred_map = {
+        "SPY": "SP500",  # S&P 500
+        "EFA": "MSCI_NQ_W_I_U",  # Placeholder for EFA if available, or use 'SP500'
+        "EEM": "MSCI_NQ_E_M_I",  # Placeholder for EEM
+        "TLT": "LTGOVTBD",  # Long Term Gov Bonds
+        "LQD": "BAA10Y",  # Corporate Bond Spread
+        "HYG": "BAMLH0A0HYM2",  # High Yield Master II
+        "GLD": "GOLDAMGBD228NLBM",  # Gold Price
+        "USO": "DCOILWTICO",  # WTI Oil Price
+        "EURUSD=X": "DEXUSEU",  # EUR/USD
+        "GBPUSD=X": "DEXUSUK",  # GBP/USD
+    }
+
+    # Priority: explicit tickers > YAML > hardcoded defaults
+    if tickers is None:
         yaml_cfg = load_market_yaml()
-        selected = resolve_tickers(yaml_cfg)
+        tickers = yaml_cfg.get("tickers", fred_map) if yaml_cfg else fred_map
 
     data = {}
-    for col_name, series_id in selected.items():
+    for col_name, fred_id in tickers.items():
         try:
+            print(f"Fetching {col_name} using FRED ID: {fred_id}...")
             s = fred.get_series(
-                series_id,
+                fred_id,
                 observation_start=start,
                 observation_end=end,
             )
             data[col_name] = s
         except Exception as e:
-            print(f"Failed to fetch {series_id} ({col_name}): {e}")
-            data[col_name] = pd.Series(dtype=float)  # fallback
+            print(f"Failed to fetch {fred_id} ({col_name}): {e}")
+            data[col_name] = pd.Series(dtype=float)
 
     df = pd.DataFrame(data)
+    df = df.dropna(axis=1, how="all")
 
-    # Fill gaps
-    df = df.ffill().bfill()
+    # Ensure DatetimeIndex before resampling
+    df.index = pd.to_datetime(df.index)
 
-    return df
+    # Resample to business daily, forward-fill gaps
+    df = df.resample("B").last().ffill()
+
+    # Log returns
+    returns = np.log(df / df.shift(1)).dropna()
+    returns = returns.loc[:, returns.std() > 1e-8]
+
+    if returns.empty or returns.shape[1] == 0:
+        raise ValueError(
+            "No valid return series after cleaning. Check FRED data fetch."
+        )
+
+    return returns
 
 
 def load_dummy_positions(
@@ -145,57 +155,63 @@ def load_historical_returns(
     tickers: list[str],
     start_date: str = "2020-01-01",
     end_date: str = None,
-    source: str = "yahoo",
+    source: str = "fred",
 ) -> pd.DataFrame:
-    """
-    Load historical returns for factor universe.
-
-    Parameters
-    ----------
-    tickers : list[str]
-        Risk factor tickers (e.g., ['SPY', 'TLT', 'GLD'])
-    start_date : str
-        Start date in 'YYYY-MM-DD' format
-    end_date : str, optional
-        End date (default: today)
-    source : str
-        Data source: 'yahoo' or 'fred'
-
-    Returns
-    -------
-    returns : pd.DataFrame
-        Daily log returns, columns = tickers
-    """
     if source != "fred":
-        raise ValueError("Only source='fred' is now supported (using fredapi)")
+        raise ValueError("Only source='fred' is now supported.")
 
     api_key = os.getenv("FRED_API_KEY")
     if not api_key:
         raise ValueError("FRED_API_KEY environment variable not set")
 
     fred = Fred(api_key=api_key)
+    fred_id_map = {
+        "SPY": "SP500",
+        "EFA": "MSCI_NQ_W_I_U",
+        "EEM": "MSCI_NQ_E_M_I",
+        "TLT": "LTGOVTBD",
+        "LQD": "BAA10Y",
+        "HYG": "BAMLH0A0HYM2",
+        "GLD": "GOLDAMGBD228NLBM",
+        "USO": "DCOILWTICO",
+        "EURUSD=X": "DEXUSEU",
+        "GBPUSD=X": "DEXUSUK",
+    }
 
     if end_date is None:
         end_date = datetime.today().strftime("%Y-%m-%d")
 
     dfs = []
     for ticker in tickers:
+        fred_id = fred_id_map.get(ticker, ticker)
         try:
             s = fred.get_series(
-                ticker,
-                observation_start=start_date,
-                observation_end=end_date,
+                fred_id, observation_start=start_date, observation_end=end_date
             )
             s.name = ticker
             dfs.append(s)
         except Exception as e:
-            print(f"Failed to load {ticker}: {e}")
+            print(f"Failed to load {fred_id}: {e}")
 
     if not dfs:
         raise ValueError("No FRED series loaded successfully")
 
+    # --- SINGLE PASS CLEANING ---
     prices = pd.concat(dfs, axis=1).sort_index()
+    prices = prices.ffill().dropna()  # Fill gaps first
+
+    # Ensure all prices are positive to avoid log(0) which creates Inf
+    prices = prices.apply(pd.to_numeric, errors="coerce")
+    prices = prices.clip(lower=1e-6)
+
+    # Calculate Log Returns
     returns = np.log(prices / prices.shift(1)).dropna()
+
+    # Hard cap at 50% daily move
+    returns = returns.clip(lower=-0.55, upper=0.50)
+
+    print(f"DEBUG: Max daily return: {returns.max().max():.4%}")
+    print(f"DEBUG: Data shape: {returns.shape}")
 
     return returns
 

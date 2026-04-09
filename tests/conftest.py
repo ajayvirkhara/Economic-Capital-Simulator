@@ -4,6 +4,9 @@ import numpy as np
 from econ_capital.utils import setup_logging, set_global_seed
 import econ_capital.op_risk.stress_tests as st
 import econ_capital.op_risk.config as cfg
+import os
+
+os.environ.setdefault("FRED_API_KEY", "test-key")
 
 
 @pytest.fixture(scope="session", autouse=True)

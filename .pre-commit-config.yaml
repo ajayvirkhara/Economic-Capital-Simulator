@@ -39,6 +39,7 @@ repos:
           - setuptools
           - pandas>=2.2.1
           - matplotlib
+          - python-dotenv
 
   # Nbstriput - strip Notebook outputs
   -   repo: https://github.com/kynan/nbstripout

@@ -44,7 +44,7 @@ def test_load_real_risk_factors_explicit_tickers(mock_fred_class):
 
     assert isinstance(levels, pd.DataFrame)
     assert list(levels.columns) == ["10Y_Yield", "VIX"]
-    assert levels.shape == (11, 2)  # levels, no pct_change drop
+    assert levels.shape == (10, 2)  # levels, no pct_change drop
     assert mock_fred.get_series.call_count == 2
 
 

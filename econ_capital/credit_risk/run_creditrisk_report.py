@@ -77,6 +77,16 @@ def main():
         df_positions = load_issuer_spreads_csv(str(csv_file))
         # Filter for EAD measures
         df_positions = df_positions[df_positions["measure"].str.upper() == "EAD"]
+        import pandas as pd
+
+        # Force numeric conversion (converts '0.01' string to 0.01 float)
+        df_positions["value"] = pd.to_numeric(df_positions["value"], errors="coerce")
+        df_positions["pd_annual"] = pd.to_numeric(
+            df_positions["pd_annual"], errors="coerce"
+        )
+
+        # Remove any rows that became NaN because they weren't numbers
+        df_positions = df_positions.dropna(subset=["value", "pd_annual"])
     else:
         print(f"WARNING: {csv_file} not found. Using default dummy data.")
         df_positions = load_dummy_credit_data()
